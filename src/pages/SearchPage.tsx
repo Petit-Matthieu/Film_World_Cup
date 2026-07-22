@@ -4,7 +4,7 @@ import SearchBar from '../components/SearchBar';
 import PersonCard from '../components/PersonCard';
 import LoadingSpinner from '../components/LoadingSpinner';
 import { useTournament } from '../context/TournamentContext';
-import { searchPerson, searchSuggest, suggestToPerson } from '../services/douban';
+import { searchPerson, searchSuggest, getDirectorsFromMovie } from '../services/douban';
 import type { Person } from '../types';
 
 interface SuggestItem {
@@ -54,34 +54,43 @@ export default function SearchPage() {
   // 从联想中选择影人
   const handleSelectSuggestion = useCallback(
     async (item: SuggestItem) => {
-      // 如果是电影类型，不做处理（我们只要影人）
-      if (item.type === 'movie' || item.type === 'tv') {
-        // 可以搜索这个电影的导演...但先忽略
-        return;
-      }
-
       setIsLoading(true);
       setError('');
       setHasSearched(true);
 
       try {
-        const person = suggestToPerson(item);
-        if (person) {
-          setPerson(person);
+        // 影人：直接从 URL 提取 ID
+        const cMatch = item.url?.match(/(?:celebrity|personage)\/(\d+)/);
+        if (cMatch) {
+          setPerson({
+            id: cMatch[1],
+            name: item.title,
+            department: item.subTitle || '影人',
+            avatarUrl: null,
+          });
           navigate('/select');
           return;
         }
 
-        // suggestToPerson 失败，尝试搜索
+        // 电影：从电影页提取导演
+        const mId = item.url?.match(/subject\/(\d+)/)?.[1];
+        if (mId) {
+          const people = await getDirectorsFromMovie(mId);
+          if (people.length > 0) {
+            setResults(people);
+            return;
+          }
+        }
+
+        // 兜底搜索
         const people = await searchPerson(item.title);
         if (people.length > 0) {
-          setPerson(people[0]);
-          navigate('/select');
+          setResults(people);
         } else {
-          setError(`未找到"${item.title}"的详细信息`);
+          setError(`未找到"${item.title}"相关影人`);
         }
       } catch (err) {
-        console.error('选择影人失败:', err);
+        console.error('失败:', err);
         setError('获取影人信息失败，请重试');
       } finally {
         setIsLoading(false);
