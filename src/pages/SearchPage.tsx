@@ -1,25 +1,101 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useRef, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import SearchBar from '../components/SearchBar';
 import PersonCard from '../components/PersonCard';
 import LoadingSpinner from '../components/LoadingSpinner';
 import { useTournament } from '../context/TournamentContext';
-import { searchPerson } from '../services/douban';
+import { searchPerson, searchSuggest, suggestToPerson } from '../services/douban';
 import type { Person } from '../types';
+
+interface SuggestItem {
+  title: string;
+  subTitle: string;
+  url: string;
+  type: string;
+  image: string;
+}
 
 export default function SearchPage() {
   const { setPerson, state } = useTournament();
   const navigate = useNavigate();
 
   const [results, setResults] = useState<Person[]>([]);
+  const [suggestions, setSuggestions] = useState<SuggestItem[]>([]);
   const [isLoading, setIsLoading] = useState(false);
+  const [isSearching, setIsSearching] = useState(false); // 联想请求中
   const [error, setError] = useState('');
   const [hasSearched, setHasSearched] = useState(false);
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  // 实时联想
+  const handleInputChange = useCallback((query: string) => {
+    if (debounceRef.current) {
+      clearTimeout(debounceRef.current);
+    }
+
+    if (!query.trim()) {
+      setSuggestions([]);
+      return;
+    }
+
+    setIsSearching(true);
+    debounceRef.current = setTimeout(async () => {
+      try {
+        const items = await searchSuggest(query.trim());
+        setSuggestions(items);
+      } catch {
+        setSuggestions([]);
+      } finally {
+        setIsSearching(false);
+      }
+    }, 300);
+  }, []);
+
+  // 从联想中选择影人
+  const handleSelectSuggestion = useCallback(
+    async (item: SuggestItem) => {
+      // 如果是电影类型，不做处理（我们只要影人）
+      if (item.type === 'movie' || item.type === 'tv') {
+        // 可以搜索这个电影的导演...但先忽略
+        return;
+      }
+
+      setIsLoading(true);
+      setError('');
+      setHasSearched(true);
+
+      try {
+        const person = suggestToPerson(item);
+        if (person) {
+          setPerson(person);
+          navigate('/select');
+          return;
+        }
+
+        // suggestToPerson 失败，尝试搜索
+        const people = await searchPerson(item.title);
+        if (people.length > 0) {
+          setPerson(people[0]);
+          navigate('/select');
+        } else {
+          setError(`未找到"${item.title}"的详细信息`);
+        }
+      } catch (err) {
+        console.error('选择影人失败:', err);
+        setError('获取影人信息失败，请重试');
+      } finally {
+        setIsLoading(false);
+      }
+    },
+    [setPerson, navigate]
+  );
+
+  // 传统搜索（回车触发）
   const handleSearch = useCallback(async (query: string) => {
     setIsLoading(true);
     setError('');
     setHasSearched(true);
+    setSuggestions([]);
 
     try {
       const people = await searchPerson(query);
@@ -51,9 +127,7 @@ export default function SearchPage() {
       {!hasSearched && (
         <div className="text-center pt-16 pb-8 px-4">
           <div className="text-6xl mb-6">🏆🎬</div>
-          <h2 className="text-3xl font-bold text-white mb-3">
-            电影世界杯
-          </h2>
+          <h2 className="text-3xl font-bold text-white mb-3">电影世界杯</h2>
           <p className="text-gray-400 text-lg max-w-md mx-auto">
             搜索一位导演或演员，用 Ta 的经典电影来一场单败淘汰赛！
           </p>
@@ -67,7 +141,14 @@ export default function SearchPage() {
 
       {/* 搜索栏 */}
       <div className={`px-4 ${hasSearched ? 'pt-4' : ''}`}>
-        <SearchBar onSearch={handleSearch} isLoading={isLoading} />
+        <SearchBar
+          onSearch={handleSearch}
+          onSelectSuggestion={handleSelectSuggestion}
+          suggestions={suggestions}
+          isLoading={isLoading}
+          isSearching={isSearching}
+          onInputChange={handleInputChange}
+        />
       </div>
 
       {/* 状态 */}
@@ -87,7 +168,7 @@ export default function SearchPage() {
             <p className="text-sm text-gray-500 mb-3">
               找到 {results.length} 位影人
             </p>
-            {results.map((person, i) => (
+            {results.map((person) => (
               <PersonCard
                 key={person.id}
                 person={person}
@@ -98,39 +179,31 @@ export default function SearchPage() {
         )}
 
         {/* 恢复之前的状态 */}
-        {!hasSearched &&
-          !isLoading &&
-          state.person &&
-          state.phase === 'selection' && (
-            <div className="text-center mt-8 p-4 bg-gray-800/40 rounded-xl">
-              <p className="text-gray-400 text-sm mb-3">
-                上次搜索：{state.person.name}
-              </p>
-              <button
-                onClick={() => navigate('/select')}
-                className="text-indigo-400 hover:text-indigo-300 text-sm font-medium"
-              >
-                继续上次的选择 →
-              </button>
-            </div>
-          )}
+        {!hasSearched && !isLoading && state.person && state.phase === 'selection' && (
+          <div className="text-center mt-8 p-4 bg-gray-800/40 rounded-xl">
+            <p className="text-gray-400 text-sm mb-3">
+              上次搜索：{state.person.name}
+            </p>
+            <button
+              onClick={() => navigate('/select')}
+              className="text-indigo-400 hover:text-indigo-300 text-sm font-medium"
+            >
+              继续上次的选择 →
+            </button>
+          </div>
+        )}
 
-        {!hasSearched &&
-          !isLoading &&
-          state.bracket &&
-          !state.bracket.isComplete && (
-            <div className="text-center mt-4 p-4 bg-gray-800/40 rounded-xl">
-              <p className="text-gray-400 text-sm mb-3">
-                有未完成的比赛
-              </p>
-              <button
-                onClick={() => navigate('/bracket')}
-                className="text-indigo-400 hover:text-indigo-300 text-sm font-medium"
-              >
-                继续投票 →
-              </button>
-            </div>
-          )}
+        {!hasSearched && !isLoading && state.bracket && !state.bracket.isComplete && (
+          <div className="text-center mt-4 p-4 bg-gray-800/40 rounded-xl">
+            <p className="text-gray-400 text-sm mb-3">有未完成的比赛</p>
+            <button
+              onClick={() => navigate('/bracket')}
+              className="text-indigo-400 hover:text-indigo-300 text-sm font-medium"
+            >
+              继续投票 →
+            </button>
+          </div>
+        )}
       </div>
     </div>
   );

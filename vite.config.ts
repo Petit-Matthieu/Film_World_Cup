@@ -15,4 +15,35 @@ export default defineConfig({
       },
     },
   },
+  server: {
+    proxy: {
+      '/api/movie': {
+        target: 'https://movie.douban.com',
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/api\/movie/, ''),
+        headers: { Referer: 'https://movie.douban.com/' },
+      },
+      '/api/www': {
+        target: 'https://www.douban.com',
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/api\/www/, ''),
+        headers: { Referer: 'https://www.douban.com/' },
+      },
+      '/api/img': {
+        target: 'https://img1.doubanio.com',
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/api\/img/, ''),
+      },
+      '/api/img2': {
+        target: 'https://img2.doubanio.com',
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/api\/img2/, ''),
+      },
+      '/api/img3': {
+        target: 'https://img3.doubanio.com',
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/api\/img3/, ''),
+      },
+    },
+  },
 })

@@ -1,28 +1,39 @@
-import { CORS_PROXIES } from '../constants';
+import { IS_DEV, CORS_PROXIES } from '../constants';
 
 /**
- * 通过 CORS 代理发起请求，自动尝试备用代理
+ * 请求豆瓣页面/API
+ * 开发模式：通过 Vite proxy 直连（无 CORS 问题）
+ * 生产模式：通过 CORS 代理
  */
-export async function fetchWithProxy(
+export async function fetchDouban(url: string): Promise<string> {
+  if (IS_DEV) {
+    // 开发模式：转换 URL 为本地代理路径
+    let proxyUrl = url
+      .replace('https://movie.douban.com', '/api/movie')
+      .replace('https://www.douban.com', '/api/www');
+
+    const res = await fetch(proxyUrl);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    return await res.text();
+  }
+
+  // 生产模式：尝试多个 CORS 代理
+  return fetchWithCORSProxy(url, 0);
+}
+
+async function fetchWithCORSProxy(
   url: string,
-  proxyIndex: number = 0
+  proxyIndex: number
 ): Promise<string> {
   if (proxyIndex >= CORS_PROXIES.length) {
     throw new Error('所有代理均不可用，请稍后重试');
   }
 
-  const proxyUrl = CORS_PROXIES[proxyIndex](url);
-
   try {
-    const res = await fetch(proxyUrl, {
-      headers: {
-        'Accept': 'text/html,application/json,*/*',
-      },
-    });
+    const proxyUrl = CORS_PROXIES[proxyIndex](url);
+    const res = await fetch(proxyUrl);
 
-    if (!res.ok) {
-      throw new Error(`HTTP ${res.status}`);
-    }
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
 
     const contentType = res.headers.get('content-type') || '';
     if (contentType.includes('application/json')) {
@@ -30,17 +41,35 @@ export async function fetchWithProxy(
     }
     return await res.text();
   } catch (err) {
-    console.warn(`代理 ${proxyIndex + 1} 失败，尝试下一个...`, err);
-    return fetchWithProxy(url, proxyIndex + 1);
+    console.warn(`代理 ${proxyIndex + 1} 失败，尝试下一个...`);
+    return fetchWithCORSProxy(url, proxyIndex + 1);
   }
 }
 
 /**
- * 代理图片 URL（绕过豆瓣防盗链）
+ * 请求豆瓣 JSON API
  */
-export function proxyImage(url: string): string {
-  if (!url) return '';
-  // 使用 images.weserv.nl 代理图片，支持裁剪和 HTTPS
-  const encoded = encodeURIComponent(url);
-  return `https://images.weserv.nl/?url=${encoded}&w=300&output=webp`;
+export async function fetchDoubanJSON(url: string): Promise<any> {
+  if (IS_DEV) {
+    let proxyUrl = url
+      .replace('https://movie.douban.com', '/api/movie')
+      .replace('https://www.douban.com', '/api/www');
+
+    const res = await fetch(proxyUrl);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    return await res.json();
+  }
+
+  for (let i = 0; i < CORS_PROXIES.length; i++) {
+    try {
+      const proxyUrl = CORS_PROXIES[i](url);
+      const res = await fetch(proxyUrl);
+      if (!res.ok) continue;
+      return await res.json();
+    } catch {
+      continue;
+    }
+  }
+
+  throw new Error('所有代理均不可用');
 }
