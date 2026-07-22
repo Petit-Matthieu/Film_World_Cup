@@ -1,165 +1,185 @@
-import { fetchDouban, fetchDoubanJSON } from './proxy';
-import { getImageUrl, MAX_FILMS } from '../constants';
+import { IS_DEV, getImageUrl, MAX_FILMS } from '../constants';
 import type { Person, Movie } from '../types';
 
+const debug = (...args: unknown[]) => {
+  if (IS_DEV) console.log('[Douban]', ...args);
+};
+
 // ============================================================
-// 自动联想搜索（实时下拉建议）
+// 底层请求：开发走 Vite 代理，生产走 CORS 代理
 // ============================================================
 
-interface SuggestItem {
-  title: string;       // 显示名
-  subTitle: string;    // 副标题（类型描述）
-  url: string;         // 详情页 URL
-  type: string;        // 类型：movie, celebrity, music 等
-  image: string;       // 头像/海报 URL
+async function fetchText(url: string): Promise<string> {
+  if (IS_DEV) {
+    const proxyPath = url
+      .replace('https://movie.douban.com', '/api/movie')
+      .replace('https://www.douban.com', '/api/www');
+    debug('fetch:', url, '→', proxyPath);
+    const res = await fetch(proxyPath);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    return await res.text();
+  }
+
+  // 生产：CORS 代理
+  const corsProxies = [
+    (u: string) => `https://corsproxy.io/?${encodeURIComponent(u)}`,
+    (u: string) => `https://api.allorigins.win/raw?url=${encodeURIComponent(u)}`,
+  ];
+  for (const proxy of corsProxies) {
+    try {
+      const res = await fetch(proxy(url));
+      if (res.ok) return await res.text();
+    } catch { continue; }
+  }
+  throw new Error('所有代理均不可用');
 }
 
-/**
- * 自动联想：输入关键词，实时返回建议列表
- * 使用豆瓣搜索建议 JSON API
- */
-export async function searchSuggest(query: string): Promise<SuggestItem[]> {
-  if (!query.trim() || query.trim().length < 1) return [];
-
+async function fetchJSON(url: string): Promise<any> {
+  const text = await fetchText(url);
   try {
-    // 豆瓣搜索建议 API（JSON格式）
-    const url = `https://www.douban.com/j/search_suggest?q=${encodeURIComponent(query)}`;
-    const data = await fetchDoubanJSON(url);
-
-    if (!Array.isArray(data)) return [];
-
-    return data
-      .filter((item: any) => {
-        // 只保留影人和电影
-        const type = item.type || '';
-        return (
-          type === 'celebrity' ||
-          type === 'celebrities' ||
-          type === 'movie' ||
-          type === 'tv' ||
-          item.url?.includes('/celebrity/') ||
-          item.url?.includes('/subject/')
-        );
-      })
-      .map((item: any) => ({
-        title: item.title || item.name || '',
-        subTitle: item.sub_title || item.subtitle || item.type || '',
-        url: item.url || '',
-        type: item.type || (item.url?.includes('/celebrity/') ? 'celebrity' : 'movie'),
-        image: item.pic || item.image || item.cover || '',
-      }))
-      .filter((item: SuggestItem) => item.title && item.url)
-      .slice(0, 10);
-  } catch (err) {
-    console.warn('联想搜索失败:', err);
-    return [];
+    return JSON.parse(text);
+  } catch {
+    // 可能返回的是 HTML（被重定向），返回空
+    debug('JSON parse failed, got HTML instead of JSON for:', url);
+    return null;
   }
 }
 
 // ============================================================
-// 搜索影人
+// 自动联想搜索
 // ============================================================
 
-/**
- * 将联想结果转为 Person
- */
+interface SuggestItem {
+  title: string;
+  subTitle: string;
+  url: string;
+  type: string;
+  image: string;
+}
+
+export async function searchSuggest(query: string): Promise<SuggestItem[]> {
+  const q = query.trim();
+  if (!q || q.length < 1) return [];
+
+  debug('suggest:', q);
+
+  // 尝试多个 API 端点
+  const endpoints = [
+    `https://www.douban.com/j/search_suggest?q=${encodeURIComponent(q)}`,
+    `https://movie.douban.com/j/subject_suggest?q=${encodeURIComponent(q)}`,
+  ];
+
+  for (const url of endpoints) {
+    try {
+      const data = await fetchJSON(url);
+      if (!data || !Array.isArray(data)) continue;
+
+      debug('suggest results:', data.length, 'items from', url);
+
+      const items = data
+        .filter((item: any) => {
+          const type = item.type || '';
+          const ep = item.ep || ''; // 豆瓣有时用 ep 字段
+          return (
+            type === 'celebrity' || type === 'celebrities' ||
+            type === 'movie' || type === 'tv' || ep === 'movie' || ep === 'tv' ||
+            item.url?.includes('/celebrity/') || item.url?.includes('/subject/')
+          );
+        })
+        .map((item: any) => ({
+          title: item.title || item.name || '',
+          subTitle: item.sub_title || item.subtitle || item.info || item.type_name || '',
+          url: item.url || '',
+          type: item.type || item.ep || '',
+          image: item.pic || item.cover || item.img || '',
+        }))
+        .filter((item: SuggestItem) => item.title && item.url)
+        .slice(0, 10);
+
+      if (items.length > 0) return items;
+    } catch (err) {
+      debug('suggest endpoint failed:', url, err);
+      continue;
+    }
+  }
+
+  return [];
+}
+
 export function suggestToPerson(item: SuggestItem): Person | null {
   const idMatch = item.url.match(/celebrity\/(\d+)/);
   if (!idMatch) return null;
-
   return {
     id: idMatch[1],
     name: item.title,
     department: item.subTitle || '影人',
-    avatarUrl: item.image ? getImageUrl(item.image) : null,
+    avatarUrl: getImageUrl(item.image || null),
   };
 }
 
-/**
- * 搜索影人（从 HTML 搜索结果中解析）
- * 作为 suggest API 的补充/备选方案
- */
+// ============================================================
+// 搜索影人（HTML 解析 - 备选方案）
+// ============================================================
+
 export async function searchPerson(query: string): Promise<Person[]> {
+  debug('searchPerson:', query);
+
+  // 先用 suggest API
+  const suggestions = await searchSuggest(query);
+  const people: Person[] = [];
+
+  for (const item of suggestions) {
+    if (item.type === 'celebrity' || item.type === 'celebrities' || item.url.includes('/celebrity/')) {
+      const person = suggestToPerson(item);
+      if (person) people.push(person);
+    }
+  }
+
+  if (people.length > 0) return people;
+
+  // 备选：HTML 搜索页
   try {
-    // 优先通过 suggest API 获取影人结果
-    const suggestions = await searchSuggest(query);
-    const people: Person[] = [];
+    const url = `https://www.douban.com/search?q=${encodeURIComponent(query)}&cat=1002`;
+    const html = await fetchText(url);
+    const doc = new DOMParser().parseFromString(html, 'text/html');
 
-    for (const item of suggestions) {
-      if (item.type === 'celebrity' || item.type === 'celebrities' || item.url.includes('/celebrity/')) {
-        const person = suggestToPerson(item);
-        if (person) people.push(person);
+    // 查找所有含影人链接的 <a> 标签
+    const allLinks = doc.querySelectorAll('a[href*="/celebrity/"]');
+    const seen = new Set<string>();
+
+    allLinks.forEach((link) => {
+      const href = link.getAttribute('href') || '';
+      const idMatch = href.match(/celebrity\/(\d+)/);
+      if (!idMatch) return;
+      const id = idMatch[1];
+      if (seen.has(id)) return;
+      seen.add(id);
+
+      const name = (link.textContent || '').trim();
+      if (!name || name.length > 60) return;
+
+      // 向上找父元素获取头像
+      const parent = link.closest('.result, .item, li, [class*="result"]');
+      let avatarUrl: string | null = null;
+      let department = '影人';
+
+      if (parent) {
+        const imgEl = parent.querySelector('img');
+        avatarUrl = imgEl?.getAttribute('src') || imgEl?.getAttribute('data-src') || null;
+
+        const descEl = parent.querySelector('.subject-cast, .meta, [class*="desc"], p');
+        if (descEl) department = (descEl.textContent || '').trim().slice(0, 60) || '影人';
       }
-    }
 
-    if (people.length > 0) return people;
+      people.push({ id, name, department, avatarUrl: getImageUrl(avatarUrl) });
+    });
 
-    // 备选：从搜索页 HTML 解析
-    return await searchPersonFromHTML(query);
+    debug('HTML parse found:', people.length, 'people');
   } catch (err) {
-    console.warn('搜索影人失败:', err);
-    return [];
-  }
-}
-
-/**
- * 从豆瓣搜索页 HTML 解析影人（备选方案）
- */
-async function searchPersonFromHTML(query: string): Promise<Person[]> {
-  const url = `https://www.douban.com/search?q=${encodeURIComponent(query)}&cat=1002`;
-  const html = await fetchDouban(url);
-
-  const parser = new DOMParser();
-  const doc = parser.parseFromString(html, 'text/html');
-  const results: Person[] = [];
-
-  // 尝试多种选择器
-  const selectors = [
-    '.search-result .result',
-    '.result-list .result',
-    '.sc-bZQynM',
-    '[class*="result"]',
-    '.item',
-    'li',
-  ];
-
-  for (const selector of selectors) {
-    const items = doc.querySelectorAll(selector);
-    if (items.length === 0) continue;
-
-    for (const item of items) {
-      try {
-        const linkEl = item.querySelector('a[href*="celebrity"]') || item.querySelector('a[href*="/celebrity/"]');
-        if (!linkEl) continue;
-
-        const href = linkEl.getAttribute('href') || '';
-        const idMatch = href.match(/celebrity\/(\d+)/);
-        if (!idMatch) continue;
-
-        const name = (linkEl.textContent || '').trim();
-        if (!name || name.length > 50) continue;
-
-        const imgEl = item.querySelector('img');
-        const avatarUrl = imgEl?.getAttribute('src') || imgEl?.getAttribute('data-src') || null;
-
-        const descEl = item.querySelector('.subject-cast, .meta, p, [class*="desc"]');
-        const department = (descEl?.textContent || '').trim() || '影人';
-
-        results.push({
-          id: idMatch[1],
-          name,
-          department: department.slice(0, 50),
-          avatarUrl: getImageUrl(avatarUrl),
-        });
-      } catch {
-        // skip broken items
-      }
-    }
-
-    if (results.length > 0) break;
+    debug('HTML search failed:', err);
   }
 
-  return results.slice(0, 20);
+  return people.slice(0, 20);
 }
 
 // ============================================================
@@ -167,95 +187,61 @@ async function searchPersonFromHTML(query: string): Promise<Person[]> {
 // ============================================================
 
 export async function getPersonFilms(personId: string): Promise<Movie[]> {
-  // 使用移动端页面，按评分排序
-  const url = `https://movie.douban.com/celebrity/${personId}/movies?start=0&format=pic&sortby=vote`;
-  const html = await fetchDouban(url);
+  debug('getPersonFilms:', personId);
 
-  const parser = new DOMParser();
-  const doc = parser.parseFromString(html, 'text/html');
+  // 移动端页面：按评分排序
+  const url = `https://movie.douban.com/celebrity/${personId}/movies?start=0&format=pic&sortby=vote`;
+  const html = await fetchText(url);
+  const doc = new DOMParser().parseFromString(html, 'text/html');
   const films: Movie[] = [];
   const seen = new Set<string>();
 
-  // 查找所有电影链接
   const movieLinks = doc.querySelectorAll('a[href*="/subject/"]');
 
   movieLinks.forEach((link) => {
     try {
       const href = link.getAttribute('href') || '';
-      // 排除影人链接
       if (href.includes('/celebrity/')) return;
 
       const idMatch = href.match(/subject\/(\d+)/);
       if (!idMatch) return;
-
       const id = idMatch[1];
       if (seen.has(id)) return;
       seen.add(id);
 
-      // 获取标题
       let title = link.getAttribute('title') || link.textContent?.trim() || '';
-      // 如果标题包含很多内容，尝试提取
-      const titleEl = link.querySelector('.title, [class*="title"]');
-      if (titleEl) title = titleEl.textContent?.trim() || title;
-
-      // 清理标题
       title = title.replace(/[\n\r]+/g, ' ').replace(/\s+/g, ' ').trim();
-      if (title.length > 80) title = title.slice(0, 80);
+      if (title.length > 80 || title.length < 1) return;
+      if (title.includes('http') || title.includes('更多')) return;
 
-      if (!title || title.length < 1) return;
-
-      // 找到父容器提取评分、年份、海报
-      const parent = link.closest('li') || link.closest('.item') || link.closest('[class*="item"]') || link.parentElement;
-
+      const parent = link.closest('li') || link.closest('.item') || link.parentElement;
       let rating = 0;
       let voteCount = 0;
       let releaseYear = '';
       let posterUrl: string | null = null;
 
       if (parent) {
+        const text = parent.textContent || '';
+
         // 评分
-        const ratingEl = parent.querySelector('.rating_nums, [class*="rating_num"], .rating, .star');
-        if (ratingEl) {
-          const rMatch = ratingEl.textContent?.match(/([\d.]+)/);
-          if (rMatch) rating = parseFloat(rMatch[1]);
-        }
+        const rMatch = text.match(/([\d.]+)\s*分/) || parent.querySelector('.rating_nums, [class*="rating"]')?.textContent?.match(/([\d.]+)/);
+        if (rMatch) rating = parseFloat(rMatch[1]);
 
         // 评价人数
-        const voteEl = parent.querySelector('.pl, [class*="rating_people"], [class*="vote"]');
-        if (voteEl) {
-          const vMatch = voteEl.textContent?.match(/\d+/);
-          // 可能包含括号，提取数字
-          const nums = voteEl.textContent?.match(/\((\d+)/) || voteEl.textContent?.match(/(\d+)/);
-          // try again
-        }
-
-        // 用 parent 的 textContent 提取人数
-        const parentText = parent.textContent || '';
-        const voteParentMatch = parentText.match(/\((\d+)\s*人/);
-        if (voteParentMatch) voteCount = parseInt(voteParentMatch[1]);
+        const vMatch = text.match(/\((\d+)\s*人/);
+        if (vMatch) voteCount = parseInt(vMatch[1]);
 
         // 年份
-        const yearMatch = parentText.match(/(\d{4})/);
-        if (yearMatch) releaseYear = yearMatch[1];
+        const yMatch = text.match(/(\d{4})/);
+        if (yMatch) releaseYear = yMatch[1];
 
         // 海报
         const imgEl = parent.querySelector('img');
-        if (imgEl) {
-          const src = imgEl.getAttribute('src') || imgEl.getAttribute('data-src') || '';
-          if (src && !src.includes('celebrity') && !src.includes('default') && !src.includes('icon')) {
-            posterUrl = src;
-          }
+        const src = imgEl?.getAttribute('src') || imgEl?.getAttribute('data-src') || '';
+        if (src && !src.includes('celebrity') && !src.includes('icon')) {
+          posterUrl = src;
         }
       }
-
-      // 过滤掉无效条目
-      const lowerTitle = title.toLowerCase();
-      if (
-        lowerTitle.includes('http') ||
-        lowerTitle.includes('查看更多') ||
-        lowerTitle.includes('更多') ||
-        lowerTitle.length > 60
-      ) return;
 
       const popularity = rating * Math.log10(Math.max(voteCount, 10));
 
@@ -268,13 +254,11 @@ export async function getPersonFilms(personId: string): Promise<Movie[]> {
         releaseYear,
         popularity: Math.round(popularity * 100) / 100,
       });
-    } catch {
-      // skip
-    }
+    } catch { /* skip */ }
   });
 
-  // 按人气排序
   films.sort((a, b) => b.popularity - a.popularity);
+  debug('films found:', films.length);
 
   return films.slice(0, MAX_FILMS);
 }

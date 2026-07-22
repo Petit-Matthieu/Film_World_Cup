@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback, type FormEvent } from 'react';
+import { useState, useEffect, useRef, type FormEvent } from 'react';
 
 interface SuggestItem {
   title: string;
@@ -30,38 +30,42 @@ export default function SearchBar({
   const [selectedIndex, setSelectedIndex] = useState(-1);
   const inputRef = useRef<HTMLInputElement>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
-  const isComposing = useRef(false); // 中文输入法组合中
+  const composingRef = useRef(false);
 
-  // 通知父组件（仅在非 IME 组合状态下）
-  const notifyChange = useCallback((value: string) => {
+  // 通知父组件（带防抖，由父组件负责 debounce）
+  const doNotify = (value: string) => {
     setQuery(value);
     setSelectedIndex(-1);
-    setShowSuggestions(true);
-    if (!isComposing.current) {
+    if (value.trim()) {
+      setShowSuggestions(true);
       onInputChange(value);
+    } else {
+      setShowSuggestions(false);
+      onInputChange('');
     }
-  }, [onInputChange]);
-
-  // 输入变化时触发联想
-  const handleChange = (value: string) => {
-    notifyChange(value);
   };
 
-  // 中文输入法开始组合（打拼音阶段）
+  const handleChange = () => {
+    const value = inputRef.current?.value || '';
+    if (!composingRef.current) {
+      doNotify(value);
+    } else {
+      // 组合中只更新显示，不触发搜索
+      setQuery(value);
+      setSelectedIndex(-1);
+    }
+  };
+
   const handleCompositionStart = () => {
-    isComposing.current = true;
+    composingRef.current = true;
   };
 
-  // 中文输入法组合结束（已确认中文字符）
-  const handleCompositionEnd = (e: React.CompositionEvent<HTMLInputElement>) => {
-    isComposing.current = false;
-    const value = (e.target as HTMLInputElement).value;
-    setQuery(value);
-    setShowSuggestions(true);
-    onInputChange(value); // 此时才真正发起搜索
+  const handleCompositionEnd = () => {
+    composingRef.current = false;
+    const value = inputRef.current?.value || '';
+    doNotify(value);
   };
 
-  // 提交搜索
   const handleSubmit = (e: FormEvent) => {
     e.preventDefault();
     const trimmed = query.trim();
@@ -71,7 +75,6 @@ export default function SearchBar({
     }
   };
 
-  // 选中建议项
   const handleSelect = (item: SuggestItem) => {
     setQuery(item.title);
     setShowSuggestions(false);
@@ -83,32 +86,19 @@ export default function SearchBar({
     }
   };
 
-  // 键盘导航
   const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (!showSuggestions || suggestions.length === 0) {
-      if (e.key === 'Enter') {
-        handleSubmit(e as unknown as FormEvent);
-      }
-      return;
-    }
+    if (!showSuggestions || suggestions.length === 0) return;
 
     if (e.key === 'ArrowDown') {
       e.preventDefault();
-      setSelectedIndex((prev) =>
-        prev < suggestions.length - 1 ? prev + 1 : 0
-      );
+      setSelectedIndex((prev) => (prev < suggestions.length - 1 ? prev + 1 : 0));
     } else if (e.key === 'ArrowUp') {
       e.preventDefault();
-      setSelectedIndex((prev) =>
-        prev > 0 ? prev - 1 : suggestions.length - 1
-      );
+      setSelectedIndex((prev) => (prev > 0 ? prev - 1 : suggestions.length - 1));
     } else if (e.key === 'Enter') {
       e.preventDefault();
       if (selectedIndex >= 0 && selectedIndex < suggestions.length) {
         handleSelect(suggestions[selectedIndex]);
-      } else {
-        setShowSuggestions(false);
-        onSearch(query.trim());
       }
     } else if (e.key === 'Escape') {
       setShowSuggestions(false);
@@ -142,11 +132,11 @@ export default function SearchBar({
             ref={inputRef}
             type="text"
             value={query}
-            onChange={(e) => handleChange(e.target.value)}
+            onChange={handleChange}
             onCompositionStart={handleCompositionStart}
             onCompositionEnd={handleCompositionEnd}
             onKeyDown={handleKeyDown}
-            onFocus={() => suggestions.length > 0 && setShowSuggestions(true)}
+            onFocus={() => { if (suggestions.length > 0) setShowSuggestions(true); }}
             placeholder="搜索导演或演员，如：王家卫、梁朝伟..."
             className="w-full px-5 py-4 pr-14 bg-gray-800/80 border border-gray-700 rounded-xl
                        text-white placeholder-gray-500
@@ -175,7 +165,6 @@ export default function SearchBar({
         </div>
       </form>
 
-      {/* 联想下拉 */}
       {showDropdown && (
         <div
           ref={dropdownRef}
@@ -192,34 +181,20 @@ export default function SearchBar({
               onClick={() => handleSelect(item)}
               onMouseEnter={() => setSelectedIndex(idx)}
             >
-              {/* 头像/海报 */}
               <div className="w-10 h-10 rounded-full bg-gray-700 overflow-hidden shrink-0">
                 {item.image ? (
-                  <img
-                    src={item.image}
-                    alt={item.title}
-                    className="w-full h-full object-cover"
-                    onError={(e) => {
-                      (e.target as HTMLImageElement).style.display = 'none';
-                    }}
-                  />
+                  <img src={item.image} alt="" className="w-full h-full object-cover"
+                    onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }} />
                 ) : (
                   <div className="w-full h-full flex items-center justify-center text-sm text-gray-500">
                     {item.type === 'celebrity' || item.type === 'celebrities' ? '👤' : '🎬'}
                   </div>
                 )}
               </div>
-
               <div className="flex-1 min-w-0">
-                <p className="text-white text-sm font-medium truncate">
-                  {item.title}
-                </p>
-                <p className="text-gray-500 text-xs truncate">
-                  {item.subTitle}
-                </p>
+                <p className="text-white text-sm font-medium truncate">{item.title}</p>
+                <p className="text-gray-500 text-xs truncate">{item.subTitle}</p>
               </div>
-
-              {/* 类型标签 */}
               <span className={`text-xs px-2 py-0.5 rounded-full shrink-0
                 ${item.type === 'celebrity' || item.type === 'celebrities'
                   ? 'bg-purple-500/20 text-purple-400'
