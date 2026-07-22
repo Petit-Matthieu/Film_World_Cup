@@ -69,58 +69,60 @@ export async function searchSuggest(query: string): Promise<SuggestItem[]> {
 export async function getDirectorsFromMovie(movieId: string): Promise<Person[]> {
   debug('getDirectorsFromMovie:', movieId);
   const people: Person[] = [];
+  const seen = new Set<string>();
 
   try {
     const html = await fetchText(`https://movie.douban.com/subject/${movieId}/`);
     const doc = new DOMParser().parseFromString(html, 'text/html');
 
-    // 导演：a[rel="v:directedBy"]
-    const directorLinks = doc.querySelectorAll('a[rel="v:directedBy"]');
-    directorLinks.forEach((link) => {
-      const href = link.getAttribute('href') || '';
-      const idMatch = href.match(/(?:celebrity|personage)\/(\d+)/);
-      const name = (link.textContent || '').trim();
-      if (idMatch && name) {
-        people.push({ id: idMatch[1], name, department: '导演', avatarUrl: null });
-      }
-    });
+    // 策略1：标准 rel 属性
+    for (const rel of ['v:directedBy', 'v:starring']) {
+      doc.querySelectorAll(`a[rel="${rel}"]`).forEach((link) => {
+        const href = link.getAttribute('href') || '';
+        const idMatch = href.match(/(?:celebrity|personage)\/(\d+)/);
+        const name = (link.textContent || '').trim();
+        if (idMatch && name && !seen.has(idMatch[1])) {
+          seen.add(idMatch[1]);
+          people.push({ id: idMatch[1], name,
+            department: rel === 'v:directedBy' ? '导演' : '演员', avatarUrl: null });
+        }
+      });
+    }
 
-    // 主演：a[rel="v:starring"]
-    const actorLinks = doc.querySelectorAll('a[rel="v:starring"]');
-    const seen = new Set(people.map((p) => p.id));
-    actorLinks.forEach((link) => {
-      const href = link.getAttribute('href') || '';
-      const idMatch = href.match(/(?:celebrity|personage)\/(\d+)/);
-      const name = (link.textContent || '').trim();
-      if (idMatch && name && !seen.has(idMatch[1])) {
-        seen.add(idMatch[1]);
-        people.push({ id: idMatch[1], name, department: '演员', avatarUrl: null });
-      }
-    });
-
-    // 如果标准选择器没找到，从 #info 区域找
+    // 策略2：#info 区域的所有影人链接
     if (people.length === 0) {
       const infoEl = doc.querySelector('#info');
       if (infoEl) {
-        const allLinks = infoEl.querySelectorAll('a[href*="/celebrity/"], a[href*="/personage/"]');
-        allLinks.forEach((link) => {
+        infoEl.querySelectorAll('a[href*="/celebrity/"], a[href*="/personage/"]').forEach((link) => {
           const href = link.getAttribute('href') || '';
           const idMatch = href.match(/(?:celebrity|personage)\/(\d+)/);
           const name = (link.textContent || '').trim();
           if (idMatch && name && !seen.has(idMatch[1])) {
             seen.add(idMatch[1]);
-            // 判断是导演还是演员
-            const prevText = link.previousSibling?.textContent || '';
-            const dept = prevText.includes('导演') ? '导演' : prevText.includes('主演') ? '演员' : '影人';
+            const label = (link.parentElement?.textContent || '').trim();
+            const dept = label.startsWith('导演') ? '导演' : label.startsWith('主演') ? '演员' : '影人';
             people.push({ id: idMatch[1], name, department: dept, avatarUrl: null });
           }
         });
       }
     }
 
-    debug('从电影页提取到', people.length, '位影人');
+    // 策略3：全页扫描（最暴力但最可靠）
+    if (people.length === 0) {
+      doc.querySelectorAll('a[href*="/celebrity/"], a[href*="/personage/"]').forEach((link) => {
+        const href = link.getAttribute('href') || '';
+        const idMatch = href.match(/(?:celebrity|personage)\/(\d+)/);
+        const name = (link.textContent || '').trim();
+        if (idMatch && name && name.length >= 2 && name.length <= 30 && !seen.has(idMatch[1])) {
+          seen.add(idMatch[1]);
+          people.push({ id: idMatch[1], name, department: '影人', avatarUrl: null });
+        }
+      });
+    }
+
+    debug('提取到', people.length, '位影人:', people.map((p) => p.name));
   } catch (err: any) {
-    warn('提取导演失败:', err.message);
+    warn('getDirectorsFromMovie 失败:', err.message);
   }
 
   return people;
@@ -135,34 +137,41 @@ export async function searchPerson(query: string): Promise<Person[]> {
   const people: Person[] = [];
   const seen = new Set<string>();
 
-  // 从 suggest API 获取（可能包含影人）
   const suggestions = await searchSuggest(query);
+
+  // 直接影人
   for (const item of suggestions) {
     const cMatch = item.url.match(/(?:celebrity|personage)\/(\d+)/);
     if (cMatch && !seen.has(cMatch[1])) {
       seen.add(cMatch[1]);
-      people.push({
-        id: cMatch[1], name: item.title,
-        department: item.subTitle || '影人',
-        avatarUrl: getImageUrl(item.image || null),
-      });
+      people.push({ id: cMatch[1], name: item.title,
+        department: item.subTitle || '影人', avatarUrl: getImageUrl(item.image || null) });
     }
   }
 
-  // 如果 suggest 没有影人但有电影，从第一部电影提取导演
+  // 自动从前3部电影提取导演/演员，按出现频率排序
   if (people.length === 0) {
-    const firstMovie = suggestions.find((s) => s.url.includes('/subject/'));
-    if (firstMovie) {
-      const mId = firstMovie.url.match(/subject\/(\d+)/)?.[1];
-      if (mId) {
-        const directors = await getDirectorsFromMovie(mId);
-        for (const d of directors) {
-          if (!seen.has(d.id)) {
-            seen.add(d.id);
-            people.push(d);
-          }
+    const movies = suggestions.filter((s) => s.url.includes('/subject/')).slice(0, 3);
+    const freq = new Map<string, { person: Person; count: number }>();
+
+    for (const movie of movies) {
+      const mId = movie.url.match(/subject\/(\d+)/)?.[1];
+      if (!mId) continue;
+      const directors = await getDirectorsFromMovie(mId);
+      for (const d of directors) {
+        if (freq.has(d.id)) {
+          freq.get(d.id)!.count++;
+        } else {
+          freq.set(d.id, { person: d, count: 1 });
         }
       }
+    }
+
+    // 按频率排序（同一导演出现多次说明更相关）
+    const sorted = [...freq.values()].sort((a, b) => b.count - a.count);
+    for (const { person, count } of sorted) {
+      debug('  ', person.name, `(${person.department}) ×${count}`);
+      people.push(person);
     }
   }
 
