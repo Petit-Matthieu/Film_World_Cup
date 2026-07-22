@@ -1,6 +1,4 @@
 export const IS_DEV = import.meta.env.DEV;
-export const TMDB_API_KEY = import.meta.env.VITE_TMDB_API_KEY || '';
-export const TMDB_IMAGE_BASE = 'https://image.tmdb.org/t/p';
 
 // 应用常量
 export const MAX_FILMS = 32;
