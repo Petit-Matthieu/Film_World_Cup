@@ -177,6 +177,15 @@ export async function searchPerson(query: string): Promise<Person[]> {
 function extractCelebrities(doc: Document, people: Person[]): void {
   const seen = new Set(people.map((p) => p.id));
 
+  // DEBUG: dump 前 50 个链接帮助排查
+  const allATags = doc.querySelectorAll('a');
+  const linksSample: string[] = [];
+  allATags.forEach((a) => {
+    const href = a.getAttribute('href') || '';
+    if (href && href.length < 200) linksSample.push(href);
+  });
+  debug('页面共', allATags.length, '个链接，前50个:', linksSample.slice(0, 50));
+
   // 多种选择器策略
   const selectorGroups = [
     // 影人卡片
