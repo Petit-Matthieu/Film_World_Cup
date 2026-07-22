@@ -108,43 +108,22 @@ export async function searchPerson(query: string): Promise<Person[]> {
   debug('searchPerson:', query);
   const people: Person[] = [];
 
-  // 主方案：影人专用搜索页（最可靠）
-  try {
-    // 移动端 celebrity 搜索，返回精简 HTML
-    const searchUrl = `https://movie.douban.com/celebrity/search?search_text=${encodeURIComponent(query)}`;
-    const html = await fetchText(searchUrl);
-    const doc = new DOMParser().parseFromString(html, 'text/html');
+  // 主方案：多个影人搜索 URL
+  const searchUrls = [
+    `https://movie.douban.com/subject_search?search_text=${encodeURIComponent(query)}&cat=1002`,
+    `https://www.douban.com/search?q=${encodeURIComponent(query)}&cat=1002`,
+  ];
 
-    // 策略1: 查找 JSON 数据（豆瓣经常在 script 标签里内嵌数据）
-    const scripts = doc.querySelectorAll('script');
-    for (const script of scripts) {
-      const text = script.textContent || '';
-      if (text.includes('celebrity') && text.includes(query)) {
-        // 尝试从内嵌数据中提取
-        const idMatches = text.matchAll(/celebrity[\/"'\s:]+(\d+)/g);
-        for (const m of idMatches) {
-          const id = m[1];
-          if (!people.find((p) => p.id === id)) {
-            // 尝试从附近找名称
-            const nameMatch = text.slice(Math.max(0, m.index! - 200), m.index! + 200)
-              .match(/title[:\s"']+([^"']+)/);
-            people.push({
-              id,
-              name: nameMatch?.[1] || query,
-              department: '影人',
-              avatarUrl: null,
-            });
-          }
-        }
-      }
-    }
-
-    // 策略2: 标准 DOM 解析
-    if (people.length === 0) {
+  for (const searchUrl of searchUrls) {
+    if (people.length > 0) break;
+    try {
+      debug('尝试搜索:', searchUrl);
+      const html = await fetchText(searchUrl);
+      const doc = new DOMParser().parseFromString(html, 'text/html');
       extractCelebrities(doc, people);
+    } catch (err: any) {
+      warn('搜索失败:', searchUrl, err.message);
     }
-  } catch (err: any) {
-    warn('影人搜索失败:', err.message);
   }
 
   // 备选：suggest API（可能返回影人）
@@ -155,18 +134,6 @@ export async function searchPerson(query: string): Promise<Person[]> {
         const person = suggestToPerson(item);
         if (person) people.push(person);
       }
-    }
-  }
-
-  // 最后备选：全网搜索
-  if (people.length === 0) {
-    try {
-      const searchUrl = `https://www.douban.com/search?q=${encodeURIComponent(query)}&cat=1002`;
-      const html = await fetchText(searchUrl);
-      const doc = new DOMParser().parseFromString(html, 'text/html');
-      extractCelebrities(doc, people);
-    } catch (err: any) {
-      warn('全网搜索失败:', err.message);
     }
   }
 
