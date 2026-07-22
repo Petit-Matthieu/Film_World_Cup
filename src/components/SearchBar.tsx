@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, type FormEvent } from 'react';
+import { useState, useEffect, useRef, useCallback, type FormEvent } from 'react';
 
 interface SuggestItem {
   title: string;
@@ -30,13 +30,35 @@ export default function SearchBar({
   const [selectedIndex, setSelectedIndex] = useState(-1);
   const inputRef = useRef<HTMLInputElement>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
+  const isComposing = useRef(false); // 中文输入法组合中
 
-  // 输入变化时触发联想
-  const handleChange = (value: string) => {
+  // 通知父组件（仅在非 IME 组合状态下）
+  const notifyChange = useCallback((value: string) => {
     setQuery(value);
     setSelectedIndex(-1);
     setShowSuggestions(true);
-    onInputChange(value);
+    if (!isComposing.current) {
+      onInputChange(value);
+    }
+  }, [onInputChange]);
+
+  // 输入变化时触发联想
+  const handleChange = (value: string) => {
+    notifyChange(value);
+  };
+
+  // 中文输入法开始组合（打拼音阶段）
+  const handleCompositionStart = () => {
+    isComposing.current = true;
+  };
+
+  // 中文输入法组合结束（已确认中文字符）
+  const handleCompositionEnd = (e: React.CompositionEvent<HTMLInputElement>) => {
+    isComposing.current = false;
+    const value = (e.target as HTMLInputElement).value;
+    setQuery(value);
+    setShowSuggestions(true);
+    onInputChange(value); // 此时才真正发起搜索
   };
 
   // 提交搜索
@@ -121,6 +143,8 @@ export default function SearchBar({
             type="text"
             value={query}
             onChange={(e) => handleChange(e.target.value)}
+            onCompositionStart={handleCompositionStart}
+            onCompositionEnd={handleCompositionEnd}
             onKeyDown={handleKeyDown}
             onFocus={() => suggestions.length > 0 && setShowSuggestions(true)}
             placeholder="搜索导演或演员，如：王家卫、梁朝伟..."
