@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useTournament } from '../context/TournamentContext';
-import { getPersonFilms } from '../services/douban';
+import { getPersonFilms } from '../services/tmdb';
 import SelectionGrid from '../components/SelectionGrid';
 import LoadingSpinner from '../components/LoadingSpinner';
 import { selectFilmCount, seedFilms } from '../utils/bracket';

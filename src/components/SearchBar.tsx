@@ -187,7 +187,7 @@ export default function SearchBar({
                     onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }} />
                 ) : (
                   <div className="w-full h-full flex items-center justify-center text-sm text-gray-500">
-                    {item.type === 'celebrity' || item.type === 'celebrities' ? '👤' : '🎬'}
+                    {item.type === 'person' || item.type === 'celebrity' || item.type === 'celebrities' ? '👤' : '🎬'}
                   </div>
                 )}
               </div>
@@ -196,10 +196,10 @@ export default function SearchBar({
                 <p className="text-gray-500 text-xs truncate">{item.subTitle}</p>
               </div>
               <span className={`text-xs px-2 py-0.5 rounded-full shrink-0
-                ${item.type === 'celebrity' || item.type === 'celebrities'
+                ${(item.type === 'person' || item.type === 'celebrity' || item.type === 'celebrities')
                   ? 'bg-purple-500/20 text-purple-400'
                   : 'bg-blue-500/20 text-blue-400'}`}>
-                {item.type === 'celebrity' || item.type === 'celebrities' ? '影人' : '电影'}
+                {(item.type === 'person' || item.type === 'celebrity' || item.type === 'celebrities') ? '影人' : '电影'}
               </span>
             </button>
           ))}
