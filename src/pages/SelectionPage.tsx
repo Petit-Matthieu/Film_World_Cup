@@ -58,10 +58,10 @@ export default function SelectionPage() {
           const ids = new Set(films.slice(0, target).map((f) => f.id));
           setSelectedIds(ids);
         }
-      } catch (err) {
-        console.error('加载电影失败:', err);
+      } catch (err: any) {
+        console.error('[SelectionPage] 加载电影失败:', err);
         if (!cancelled) {
-          setError('加载电影列表失败，请检查网络后重试');
+          setError(`加载电影列表失败：${err.message || '未知错误'}。请检查浏览器控制台（F12）的详细日志。`);
         }
       } finally {
         if (!cancelled) {
