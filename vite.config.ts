@@ -64,6 +64,12 @@ export default defineConfig({
         secure: false,
         rewrite: (path) => path.replace(/^\/api\/img3/, ''),
       },
+      '/api/img9': {
+        target: 'https://img9.doubanio.com',
+        changeOrigin: true,
+        secure: false,
+        rewrite: (path) => path.replace(/^\/api\/img9/, ''),
+      },
     },
   },
 })
