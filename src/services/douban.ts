@@ -88,12 +88,12 @@ function imgUrl(url: string | null | undefined): string | null {
     }
     return url;
   }
-  // 生产环境：走 Worker 代理（带 Referer: movie.douban.com）
+  // 生产环境：走代理（带 Referer: movie.douban.com）
   if (DOUBAN_PROXY) {
     return `${DOUBAN_PROXY}/?url=${encodeURIComponent(url)}`;
   }
-  // 无代理时直连（大概率防盗链拦截）
-  return url;
+  // 用免费代理（cors.eu.org 实测可用）
+  return `https://cors.eu.org/${url}`;
 }
 
 // ============================================================
