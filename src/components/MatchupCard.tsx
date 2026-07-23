@@ -26,6 +26,21 @@ function FilmSide({
   const [imgError, setImgError] = useState(false);
   const [isHovered, setIsHovered] = useState(false);
 
+  const handleImgError = (e: React.SyntheticEvent<HTMLImageElement>) => {
+    const img = e.target as HTMLImageElement;
+    if (img.src.includes('wsrv.nl') && film?.posterUrl) {
+      const match = img.src.match(/url=([^&]+)/);
+      if (match) {
+        const originalUrl = decodeURIComponent(match[1]);
+        if (img.src !== originalUrl) {
+          img.src = originalUrl;
+          return;
+        }
+      }
+    }
+    setImgError(true);
+  };
+
   return (
     <div
       className={`flex-1 flex flex-col items-center p-3 sm:p-4 rounded-xl transition-all duration-300
@@ -48,7 +63,7 @@ function FilmSide({
             className={`w-full h-full object-cover transition-all duration-300
               ${isHovered && !isVoted ? 'scale-110 brightness-110' : ''}`}
             referrerPolicy="no-referrer"
-            onError={() => setImgError(true)}
+            onError={handleImgError}
           />
         ) : (
           <div className="w-full h-full flex flex-col items-center justify-center p-3">

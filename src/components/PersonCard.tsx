@@ -30,8 +30,17 @@ export default function PersonCard({ person, onClick, rank }: PersonCardProps) {
             loading="lazy"
             referrerPolicy="no-referrer"
             onError={(e) => {
-              (e.target as HTMLImageElement).style.display = 'none';
-              (e.target as HTMLImageElement).nextElementSibling?.classList.remove('hidden');
+              const img = e.target as HTMLImageElement;
+              // wsrv.nl 代理失败时尝试直连
+              if (img.src.includes('wsrv.nl')) {
+                const match = img.src.match(/url=([^&]+)/);
+                if (match) {
+                  img.src = decodeURIComponent(match[1]);
+                  return;
+                }
+              }
+              img.style.display = 'none';
+              img.nextElementSibling?.classList.remove('hidden');
             }}
           />
         ) : null}

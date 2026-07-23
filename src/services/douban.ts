@@ -64,7 +64,7 @@ async function rateLimitedFetch(url: string): Promise<string> {
 function imgUrl(url: string | null | undefined): string | null {
   if (!url) return null;
   if (IS_DEV) {
-    // 本地开发：走 Vite 代理
+    // 本地开发：走 Vite 代理（带 Referer 头）
     const match = url.match(/img(\d+)\.doubanio\.com/);
     if (match) {
       const num = match[1];
@@ -78,8 +78,8 @@ function imgUrl(url: string | null | undefined): string | null {
     }
     return url;
   }
-  // 生产环境：直接用豆瓣 CDN URL（浏览器会通过 referrerpolicy 处理防盗链）
-  return url;
+  // 生产环境：用图片代理（豆瓣CDN有防盗链）
+  return `https://wsrv.nl/?url=${encodeURIComponent(url)}&w=400&output=webp&default=404`;
 }
 
 // ============================================================
@@ -384,10 +384,11 @@ export async function searchPerson(query: string): Promise<{ people: Person[]; m
 
   debug(`  去重前: ${movieMap.size} 部电影`);
 
-  // 按标题去重：同名电影只保留评分最高的
+  // 按标题+年份去重：同名同年电影只保留评分最高的
   const dedupedMovies = new Map<string, Movie>();
   for (const movie of movieMap.values()) {
-    const key = movie.title; // 用中文名作为去重key
+    if (!movie.title) continue; // 跳过空标题
+    const key = `${movie.title}|${movie.releaseYear}`;
     const existing = dedupedMovies.get(key);
     if (!existing || movie.rating > existing.rating ||
         (movie.rating === existing.rating && movie.voteCount > existing.voteCount)) {

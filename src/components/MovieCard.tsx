@@ -15,6 +15,23 @@ export default function MovieCard({
   showRating = true,
   index,
 }: MovieCardProps) {
+  const handleImgError = (e: React.SyntheticEvent<HTMLImageElement>) => {
+    const img = e.target as HTMLImageElement;
+    // 如果代理URL失败，尝试直接加载原图（带 no-referrer）
+    if (img.src.includes('wsrv.nl') && movie.posterUrl) {
+      // 从代理URL中提取原始URL
+      const match = img.src.match(/url=([^&]+)/);
+      if (match) {
+        const originalUrl = decodeURIComponent(match[1]);
+        if (img.src !== originalUrl) {
+          img.src = originalUrl;
+          return;
+        }
+      }
+    }
+    img.style.display = 'none';
+  };
+
   return (
     <button
       onClick={() => onToggle?.(movie)}
@@ -55,9 +72,7 @@ export default function MovieCard({
             className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
             loading="lazy"
             referrerPolicy="no-referrer"
-            onError={(e) => {
-              (e.target as HTMLImageElement).style.display = 'none';
-            }}
+            onError={handleImgError}
           />
         ) : null}
         <div className={`absolute inset-0 flex flex-col items-center justify-center p-2
