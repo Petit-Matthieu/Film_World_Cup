@@ -28,10 +28,8 @@ function tournamentReducer(
   switch (action.type) {
     case 'SET_PERSON':
       return {
-        ...state,
+        ...initialState,  // 完全重置
         person: action.person,
-        films: [],
-        bracket: null,
       };
 
     case 'SET_FILMS':
@@ -97,6 +95,7 @@ function tournamentReducer(
       };
 
     case 'RESET':
+      clearState();
       return { ...initialState };
 
     case 'RESTORE_STATE':
@@ -114,7 +113,7 @@ interface TournamentContextType {
   dispatch: Dispatch<TournamentAction>;
   setPerson: (person: Person) => void;
   setFilms: (films: Movie[]) => void;
-  startBracket: () => void;
+  startBracket: (films: Movie[]) => void;
   vote: (matchupId: string, winner: Movie) => void;
   goToPhase: (phase: AppPhase) => void;
   reset: () => void;
@@ -125,17 +124,19 @@ const TournamentContext = createContext<TournamentContextType | null>(null);
 export function TournamentProvider({ children }: { children: ReactNode }) {
   const [state, dispatch] = useReducer(tournamentReducer, initialState);
 
-  // 恢复保存的状态
+  // 恢复保存的状态（仅在刷新时，且只在 bracket/results 阶段恢复）
   useEffect(() => {
     const saved = loadState();
-    if (saved && saved.phase !== 'search') {
-      dispatch({ type: 'RESTORE_STATE', state: saved });
+    if (saved && (saved.phase === 'bracket' || saved.phase === 'results')) {
+      if (saved.bracket && saved.films.length > 0) {
+        dispatch({ type: 'RESTORE_STATE', state: saved });
+      }
     }
   }, []);
 
   // 保存状态
   useEffect(() => {
-    if (state.phase !== 'search' || state.person !== null) {
+    if (state.phase === 'bracket' || state.phase === 'results') {
       saveState(state);
     }
   }, [state]);
@@ -145,9 +146,9 @@ export function TournamentProvider({ children }: { children: ReactNode }) {
     dispatch,
     setPerson: (person: Person) => dispatch({ type: 'SET_PERSON', person }),
     setFilms: (films: Movie[]) => dispatch({ type: 'SET_FILMS', films }),
-    startBracket: () => {
-      const count = bracket.selectFilmCount(state.films.length);
-      const selected = state.films.slice(0, count);
+    startBracket: (films: Movie[]) => {
+      const count = bracket.selectFilmCount(films.length);
+      const selected = films.slice(0, count);
       const bracketState = bracket.buildBracket(selected);
       dispatch({ type: 'START_BRACKET', bracket: bracketState });
     },

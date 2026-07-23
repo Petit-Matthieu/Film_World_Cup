@@ -2,10 +2,28 @@ import { toPng } from 'html-to-image';
 
 export async function captureElement(element: HTMLElement): Promise<Blob | null> {
   try {
+    // 等待所有图片加载完成
+    const images = element.querySelectorAll('img');
+    await Promise.all(
+      Array.from(images).map((img) => {
+        if (img.complete && img.naturalWidth > 0) return Promise.resolve();
+        return new Promise<void>((resolve) => {
+          img.onload = () => resolve();
+          img.onerror = () => resolve(); // 即使加载失败也继续
+          // 超时保护
+          setTimeout(() => resolve(), 5000);
+        });
+      })
+    );
+
+    // 额外等一帧确保渲染
+    await new Promise((r) => setTimeout(r, 200));
+
     const dataUrl = await toPng(element, {
       quality: 1.0,
       pixelRatio: 2,
-      backgroundColor: '#030712', // gray-950
+      backgroundColor: '#0a0a0f',
+      cacheBust: false,
     });
 
     const res = await fetch(dataUrl);

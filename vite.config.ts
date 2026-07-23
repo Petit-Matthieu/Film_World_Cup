@@ -17,6 +17,20 @@ export default defineConfig({
   },
   server: {
     proxy: {
+      '/api/search': {
+        target: 'https://search.douban.com',
+        changeOrigin: true,
+        secure: false,
+        rewrite: (path) => path.replace(/^\/api\/search/, ''),
+        configure: (proxy) => {
+          proxy.on('proxyReq', (proxyReq) => {
+            proxyReq.setHeader('Referer', 'https://search.douban.com/');
+            proxyReq.setHeader('User-Agent',
+              'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
+            proxyReq.setHeader('Accept-Language', 'zh-CN,zh;q=0.9');
+          });
+        },
+      },
       '/api/movie': {
         target: 'https://movie.douban.com',
         changeOrigin: true,
@@ -46,29 +60,51 @@ export default defineConfig({
           });
         },
       },
-      '/api/img': {
-        target: 'https://img1.doubanio.com',
-        changeOrigin: true,
-        secure: false,
-        rewrite: (path) => path.replace(/^\/api\/img/, ''),
-      },
+      // NOTE: more-specific imgN proxies must come before /api/img
+      // to avoid /api/img prefix-matching /api/img2, /api/img3, /api/img9
       '/api/img2': {
         target: 'https://img2.doubanio.com',
         changeOrigin: true,
         secure: false,
         rewrite: (path) => path.replace(/^\/api\/img2/, ''),
+        configure: (proxy) => {
+          proxy.on('proxyReq', (proxyReq) => {
+            proxyReq.setHeader('Referer', 'https://movie.douban.com/');
+          });
+        },
       },
       '/api/img3': {
         target: 'https://img3.doubanio.com',
         changeOrigin: true,
         secure: false,
         rewrite: (path) => path.replace(/^\/api\/img3/, ''),
+        configure: (proxy) => {
+          proxy.on('proxyReq', (proxyReq) => {
+            proxyReq.setHeader('Referer', 'https://movie.douban.com/');
+          });
+        },
       },
       '/api/img9': {
         target: 'https://img9.doubanio.com',
         changeOrigin: true,
         secure: false,
         rewrite: (path) => path.replace(/^\/api\/img9/, ''),
+        configure: (proxy) => {
+          proxy.on('proxyReq', (proxyReq) => {
+            proxyReq.setHeader('Referer', 'https://movie.douban.com/');
+          });
+        },
+      },
+      '/api/img': {
+        target: 'https://img1.doubanio.com',
+        changeOrigin: true,
+        secure: false,
+        rewrite: (path) => path.replace(/^\/api\/img/, ''),
+        configure: (proxy) => {
+          proxy.on('proxyReq', (proxyReq) => {
+            proxyReq.setHeader('Referer', 'https://movie.douban.com/');
+          });
+        },
       },
     },
   },

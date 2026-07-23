@@ -9,7 +9,8 @@ export interface Person {
 
 export interface Movie {
   id: string;
-  title: string;
+  title: string;            // 中文名
+  titleEn: string;          // 原文名（如英文名），可能为空
   posterUrl: string | null;
   rating: number;           // 豆瓣评分 (0-10)
   voteCount: number;        // 评价人数

@@ -64,8 +64,10 @@ export default function SelectionPage() {
 
   const handleConfirm = useCallback(() => {
     const selected = allFilms.filter((f) => selectedIds.has(f.id));
+    // 先保存选中的电影
     setFilms(selected);
-    startBracket();
+    // 直接传入选中的电影，避免 startBracket 读取到旧的 state.films
+    startBracket(selected);
     navigate('/bracket');
   }, [allFilms, selectedIds, setFilms, startBracket, navigate]);
 

@@ -24,25 +24,29 @@ function FilmSide({
   onVote: () => void;
 }) {
   const [imgError, setImgError] = useState(false);
+  const [isHovered, setIsHovered] = useState(false);
 
   return (
     <div
-      className={`flex-1 flex flex-col items-center p-4 rounded-xl transition-all duration-300
+      className={`flex-1 flex flex-col items-center p-3 sm:p-4 rounded-xl transition-all duration-300
         ${isWinner
           ? 'bg-indigo-600/20 border-2 border-indigo-500 scale-105'
           : 'border-2 border-transparent'
         }
         ${isVoted && !isWinner ? 'opacity-40 scale-95' : ''}
-        ${!isVoted ? 'cursor-pointer hover:bg-gray-700/40' : ''}`}
+        ${!isVoted ? 'cursor-pointer' : ''}`}
       onClick={() => !isVoted && film && onVote()}
+      onMouseEnter={() => setIsHovered(true)}
+      onMouseLeave={() => setIsHovered(false)}
     >
-      {/* 海报 */}
-      <div className="w-28 h-40 sm:w-36 sm:h-52 rounded-lg overflow-hidden bg-gray-700 mb-3 shadow-lg">
+      {/* 海报 + hover 投票提示 */}
+      <div className="relative w-28 h-40 sm:w-36 sm:h-52 rounded-lg overflow-hidden bg-gray-700 mb-3 shadow-lg group">
         {film?.posterUrl && !imgError ? (
           <img
             src={film.posterUrl}
             alt={film.title}
-            className="w-full h-full object-cover"
+            className={`w-full h-full object-cover transition-all duration-300
+              ${isHovered && !isVoted ? 'scale-110 brightness-110' : ''}`}
             onError={() => setImgError(true)}
           />
         ) : (
@@ -53,12 +57,29 @@ function FilmSide({
             </span>
           </div>
         )}
+
+        {/* hover 时显示投票提示 */}
+        {!isVoted && film && (
+          <div className={`absolute inset-0 flex items-center justify-center bg-black/50 transition-opacity duration-200
+            ${isHovered ? 'opacity-100' : 'opacity-0'}`}>
+            <span className="text-white font-bold text-sm bg-indigo-600 px-3 py-1.5 rounded-full">
+              选这个！
+            </span>
+          </div>
+        )}
       </div>
 
-      {/* 影片名 */}
-      <h3 className="text-white text-sm sm:text-base font-medium text-center leading-tight line-clamp-2 mb-1">
-        {film?.title || '待定'}
-      </h3>
+      {/* 影片名 — 双语两行 */}
+      <div className="text-center mb-1">
+        <h3 className="text-white text-sm sm:text-base font-medium leading-tight line-clamp-2">
+          {film?.title || '待定'}
+        </h3>
+        {film?.titleEn && (
+          <p className="text-gray-500 text-xs leading-tight line-clamp-1 mt-0.5">
+            {film.titleEn}
+          </p>
+        )}
+      </div>
 
       {/* 评分信息 */}
       {film && (
@@ -68,17 +89,6 @@ function FilmSide({
           )}
           {film.releaseYear && <span className="ml-1">{film.releaseYear}</span>}
         </div>
-      )}
-
-      {/* 投票按钮 */}
-      {!isVoted && film && (
-        <button
-          className="mt-3 px-4 py-1.5 bg-indigo-600 hover:bg-indigo-500
-                     rounded-full text-white text-sm font-medium
-                     transition-all active:scale-95"
-        >
-          投票
-        </button>
       )}
 
       {/* 胜出标记 */}
@@ -107,9 +117,8 @@ export default function MatchupCard({
     <div className="w-full max-w-2xl mx-auto px-4">
       {/* 轮次信息 */}
       <div className="text-center mb-6">
-        <h2 className="text-xl font-bold text-white">{roundName}</h2>
-        <p className="text-gray-500 text-sm mt-1">
-          第 {matchupNumber} / {totalMatchups} 场
+        <p className="text-gray-500 text-sm">
+          {roundName} · 第 {matchupNumber} / {totalMatchups} 场
         </p>
       </div>
 

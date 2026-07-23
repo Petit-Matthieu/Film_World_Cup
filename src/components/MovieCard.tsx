@@ -59,7 +59,6 @@ export default function MovieCard({
             }}
           />
         ) : null}
-        {/* 无海报占位 */}
         <div className={`absolute inset-0 flex flex-col items-center justify-center p-2
           ${movie.posterUrl ? 'hidden' : ''}`}>
           <span className="text-3xl mb-2">🎬</span>
@@ -71,9 +70,14 @@ export default function MovieCard({
 
       {/* 信息 */}
       <div className="p-2.5">
-        <h4 className="text-white text-sm font-medium leading-tight line-clamp-2 mb-1">
+        <h4 className="text-white text-sm font-medium leading-tight line-clamp-1 mb-0.5">
           {movie.title}
         </h4>
+        {movie.titleEn && (
+          <p className="text-gray-500 text-xs leading-tight line-clamp-1 mb-1">
+            {movie.titleEn}
+          </p>
+        )}
         {showRating && (
           <div className="flex items-center gap-2 text-xs">
             {movie.rating > 0 ? (

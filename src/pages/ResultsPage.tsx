@@ -32,9 +32,12 @@ export default function ResultsPage() {
         <div className="text-center py-8 px-4 bg-gradient-to-b from-amber-500/10 to-transparent">
           <div className="text-5xl mb-4 animate-bounce">🏆</div>
           <p className="text-sm text-amber-400 font-medium mb-2">CHAMPION</p>
-          <h1 className="text-3xl sm:text-4xl font-black text-white mb-2">
+          <h1 className="text-3xl sm:text-4xl font-black text-white mb-1">
             {champion.title}
           </h1>
+          {champion.titleEn && (
+            <p className="text-lg text-gray-400 mb-2">{champion.titleEn}</p>
+          )}
           <div className="flex items-center justify-center gap-3 text-gray-400 text-sm">
             <span className="text-amber-400 font-bold">★ {champion.rating.toFixed(1)}</span>
             <span>{champion.releaseYear}</span>
