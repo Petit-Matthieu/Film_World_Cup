@@ -12,7 +12,7 @@ interface SuggestItem {
 }
 
 export default function SearchPage() {
-  const { setPerson, state } = useTournament();
+  const { setPerson, setFilms, state } = useTournament();
   const navigate = useNavigate();
 
   const [results, setResults] = useState<Person[]>([]);
@@ -41,14 +41,16 @@ export default function SearchPage() {
   const doSearch = useCallback(async (query: string) => {
     setIsLoading(true); setError(''); setHasSearched(true); setSuggestions([]);
     try {
-      const { people } = await searchPerson(query);
+      const { people, movies } = await searchPerson(query);
       setResults(people);
+      // 缓存电影列表，避免 SelectionPage 重复搜索
+      setFilms(movies);
       if (people.length === 0) setError(`未找到"${query}"相关影人，请尝试其他名字`);
     } catch {
       setError('搜索失败，请检查网络连接');
     }
     setIsLoading(false);
-  }, []);
+  }, [setFilms]);
 
   // 点击下拉建议
   const handleSelectSuggestion = useCallback(async (item: SuggestItem) => {

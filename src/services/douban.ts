@@ -24,14 +24,23 @@ async function fetchViaProxy(url: string): Promise<Response> {
       .replace('https://search.douban.com', '/api/search');
     return fetch(proxyPath);
   }
-  // 逐个尝试 CORS 代理
-  for (const p of CORS_PROXIES) {
-    try {
-      const r = await fetch(p(url));
-      if (r.ok) return r;
-    } catch {}
+  // 并行尝试所有代理，取最快成功的
+  const controllers: AbortController[] = [];
+  const attempts = CORS_PROXIES.map((p, i) => {
+    const ctrl = new AbortController();
+    controllers.push(ctrl);
+    const timer = setTimeout(() => ctrl.abort(), 5000); // 5秒超时
+    return fetch(p(url), { signal: ctrl.signal })
+      .then(r => { clearTimeout(timer); return r.ok ? r : Promise.reject(`HTTP ${r.status}`); })
+      .catch(err => { clearTimeout(timer); throw err; });
+  });
+  try {
+    return await Promise.any(attempts);
+  } catch {
+    throw new Error('所有代理均不可用');
+  } finally {
+    controllers.forEach(c => c.abort());
   }
-  throw new Error('所有代理均不可用');
 }
 
 async function fetchJSON(url: string): Promise<any> {
@@ -46,14 +55,7 @@ async function fetchText(url: string): Promise<string> {
   return await res.text();
 }
 
-// 防限流：简单延时
-let lastSearchPageTime = 0;
-async function rateLimitedFetch(url: string): Promise<string> {
-  const now = Date.now();
-  const minInterval = 800; // 0.8秒间隔
-  const wait = Math.max(0, minInterval - (now - lastSearchPageTime));
-  if (wait > 0) await new Promise(r => setTimeout(r, wait));
-  lastSearchPageTime = Date.now();
+async function fetchSearchPage(url: string): Promise<string> {
   return fetchText(url);
 }
 
@@ -209,7 +211,7 @@ async function searchPage(query: string, start = 0): Promise<{ items: SearchResu
   if (cached) return cached;
 
   try {
-    const html = await rateLimitedFetch(
+    const html = await fetchSearchPage(
       `https://search.douban.com/movie/subject_search?search_text=${encodeURIComponent(query)}&cat=1002&start=${start}`
     );
     const result = parseSearchHTML(html);

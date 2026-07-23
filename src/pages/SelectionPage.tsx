@@ -21,7 +21,16 @@ export default function SelectionPage() {
 
   useEffect(() => {
     if (!state.person) return;
+    // 复用搜索页已缓存的电影，避免重复请求
     if (state.films.length > 0 && state.phase === 'selection') {
+      setAllFilms(state.films);
+      setIsLoading(false);
+      const target = selectFilmCount(state.films.length);
+      setSelectedIds(new Set(state.films.slice(0, target).map((f) => f.id)));
+      return;
+    }
+    // 或者从搜索结果缓存中复用
+    if (state.films.length > 0 && state.phase === 'search') {
       setAllFilms(state.films);
       setIsLoading(false);
       const target = selectFilmCount(state.films.length);

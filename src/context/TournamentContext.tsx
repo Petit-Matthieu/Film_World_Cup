@@ -28,8 +28,10 @@ function tournamentReducer(
   switch (action.type) {
     case 'SET_PERSON':
       return {
-        ...initialState,  // 完全重置
+        ...state,
         person: action.person,
+        bracket: null,
+        phase: 'selection', // 直接进入选择阶段
       };
 
     case 'SET_FILMS':
