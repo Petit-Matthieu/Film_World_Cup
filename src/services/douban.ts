@@ -307,8 +307,10 @@ export async function searchPerson(query: string): Promise<{ people: Person[]; m
       `${query} 电影`, `${query} 导演`, `${query} 演员`, `${query} 作品`,
     ])].filter(w => w && !searchedQueries.has(w)).slice(0, 25);
 
-    if (queries.length > 0) {
-      await Promise.all(queries.map(async (q) => {
+    // 分批并行，每批4个间隔200ms，避免豆瓣限流
+    for (let i = 0; i < queries.length; i += 4) {
+      const batch = queries.slice(i, i + 4);
+      await Promise.all(batch.map(async (q) => {
         if (searchedQueries.has(q)) return;
         searchedQueries.add(q);
         try {
@@ -316,6 +318,7 @@ export async function searchPerson(query: string): Promise<{ people: Person[]; m
           for (const card of cards) addCardFromSuggest(card);
         } catch {}
       }));
+      if (i + 4 < queries.length) await new Promise(r => setTimeout(r, 200));
     }
     return searchedQueries;
   })();
