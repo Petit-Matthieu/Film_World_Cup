@@ -37,7 +37,18 @@ async function fetchText(url: string): Promise<string> {
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     return await res.text();
   }
-  throw new Error('生产环境不支持HTML抓取');
+  // 生产环境用 CORS 代理抓 HTML
+  const proxies = [
+    (u: string) => `https://corsproxy.io/?${encodeURIComponent(u)}`,
+    (u: string) => `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(u)}`,
+  ];
+  for (const p of proxies) {
+    try {
+      const r = await fetch(p(url));
+      if (r.ok) return await r.text();
+    } catch {}
+  }
+  throw new Error('所有代理均不可用');
 }
 
 // 防限流：简单延时
