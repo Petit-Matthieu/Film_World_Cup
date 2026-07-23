@@ -46,10 +46,15 @@ export default function SearchBar({
   };
 
   const handleChange = () => {
-    // IME 组合中跳过，等 compositionEnd 统一处理
-    if (composingRef.current) return;
     const value = inputRef.current?.value || '';
-    doNotify(value);
+    if (!composingRef.current) {
+      // 非IME输入：正常触发搜索
+      doNotify(value);
+    } else {
+      // IME组合中：只更新显示，不触发搜索
+      setQuery(value);
+      setSelectedIndex(-1);
+    }
   };
 
   const handleCompositionStart = () => {
@@ -58,7 +63,6 @@ export default function SearchBar({
 
   const handleCompositionEnd = () => {
     composingRef.current = false;
-    // 主动触发一次同步
     const value = inputRef.current?.value || '';
     doNotify(value);
   };
