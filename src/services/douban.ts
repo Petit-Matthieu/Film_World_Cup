@@ -7,14 +7,16 @@ const debug = (...args: unknown[]) => console.log('[Douban]', ...args);
 // 请求工具
 // ============================================================
 
-// 生产环境 CORS 代理列表
-const CORS_PROXIES = [
+// Cloudflare Worker 代理 URL（部署 worker.js 后填入）
+// 例如: https://douban-proxy.你的用户名.workers.dev
+const DOUBAN_PROXY = '';
+
+// 免费 CORS 代理（备用）
+const FALLBACK_PROXIES = [
   (u: string) => `https://api.allorigins.win/raw?url=${encodeURIComponent(u)}`,
   (u: string) => `https://corsproxy.io/?${encodeURIComponent(u)}`,
-  (u: string) => `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(u)}`,
 ];
 
-// 带超时的 fetch
 function fetchWithTimeout(url: string, ms: number): Promise<Response> {
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => reject(new Error('timeout')), ms);
@@ -31,13 +33,21 @@ async function fetchViaProxy(url: string): Promise<Response> {
       .replace('https://search.douban.com', '/api/search');
     return fetch(proxyPath);
   }
-  // 并行尝试所有代理，取第一个成功的
-  const attempts = CORS_PROXIES.map(p => fetchWithTimeout(p(url), 8000));
-  try {
-    return await Promise.any(attempts);
-  } catch {
-    throw new Error('所有代理均不可用');
+  // 优先用自建代理
+  if (DOUBAN_PROXY) {
+    try {
+      const r = await fetchWithTimeout(`${DOUBAN_PROXY}/?url=${encodeURIComponent(url)}`, 10000);
+      if (r.ok) return r;
+    } catch {}
   }
+  // 备用免费代理
+  for (const p of FALLBACK_PROXIES) {
+    try {
+      const r = await fetchWithTimeout(p(url), 6000);
+      if (r.ok) return r;
+    } catch {}
+  }
+  throw new Error('所有代理均不可用——请部署 worker.js 到 Cloudflare Workers');
 }
 
 async function fetchJSON(url: string): Promise<any> {
@@ -60,13 +70,9 @@ async function fetchSearchPage(url: string): Promise<string> {
 // 图片 URL
 // ============================================================
 
-// 生产环境图片代理（Cloudflare Worker URL — 部署 worker.js 后填入）
-const IMG_PROXY = 'https://film-img.用户名.workers.dev';
-
 function imgUrl(url: string | null | undefined): string | null {
   if (!url) return null;
   if (IS_DEV) {
-    // 本地开发：走 Vite 代理（带 Referer 头）
     const match = url.match(/img(\d+)\.doubanio\.com/);
     if (match) {
       const num = match[1];
@@ -80,12 +86,12 @@ function imgUrl(url: string | null | undefined): string | null {
     }
     return url;
   }
-  // 生产环境：Cloudflare Worker 代理（带 Referer: movie.douban.com）
-  if (IMG_PROXY.includes('用户名')) {
-    // Worker 未部署，尝试直连（大概率被防盗链拦截）
-    return url;
+  // 生产环境：走 Worker 代理（带 Referer: movie.douban.com）
+  if (DOUBAN_PROXY) {
+    return `${DOUBAN_PROXY}/?url=${encodeURIComponent(url)}`;
   }
-  return `${IMG_PROXY}/?url=${encodeURIComponent(url)}`;
+  // 无代理时直连（大概率防盗链拦截）
+  return url;
 }
 
 // ============================================================
