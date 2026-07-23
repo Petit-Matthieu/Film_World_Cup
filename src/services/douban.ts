@@ -307,21 +307,49 @@ export async function searchPerson(query: string): Promise<{ people: Person[]; m
       `${query} 电影`, `${query} 导演`, `${query} 演员`, `${query} 作品`,
     ])].filter(w => w && !searchedQueries.has(w)).slice(0, 25);
 
-    // 分批并行，每批4个间隔200ms，避免豆瓣限流
+    // 分批并行，每批4个间隔200ms
     for (let i = 0; i < queries.length; i += 4) {
       const batch = queries.slice(i, i + 4);
       await Promise.all(batch.map(async (q) => {
         if (searchedQueries.has(q)) return;
         searchedQueries.add(q);
         try {
-          const { cards } = await suggest(q);
+          const { cards, words: w2 } = await suggest(q);
           for (const card of cards) addCardFromSuggest(card);
-        } catch {}
+          return w2 || [];
+        } catch { return []; }
       }));
       if (i + 4 < queries.length) await new Promise(r => setTimeout(r, 200));
     }
     return searchedQueries;
   })();
+
+  // 第二轮级联：如果还不够，搜第一轮拿到的新词
+  const cascadePromise = suggestPromise.then(async (searchedQueries) => {
+    if (movieMap.size >= 20) return;
+    // 从已搜过的词中找更多
+    const moreQueries = [
+      query,
+      `${query} 经典`, `${query} 代表作`, `${query} 全部电影`,
+    ].filter(w => !searchedQueries.has(w));
+
+    for (const q of moreQueries) {
+      if (movieMap.size >= 20) break;
+      searchedQueries.add(q);
+      try {
+        const { cards } = await suggest(q);
+        for (const card of cards) {
+          const mId = card.url.match(/subject\/(\d+)/)?.[1];
+          if (mId && !movieMap.has(mId)) {
+            const parts = (card.card_subtitle || '').split(/\s*\/\s*/).map((s: string) => s.trim());
+            let rating = 0;
+            if (parts[0]) { const m = parts[0].match(/([\d.]+)/); if (m) rating = parseFloat(m[1]); }
+            movieMap.set(mId, makeMovie(mId, card.title, card.cover_url, rating, 0, card.year || ''));
+          }
+        }
+      } catch {}
+    }
+  });
 
   const searchPagePromise = (async () => {
     try {
