@@ -103,6 +103,7 @@ export default function ShareImage({ bracket, person }: ShareImageProps) {
                         src={champion.posterUrl}
                         alt={champion.title}
                         className="w-36 h-52 rounded-xl object-cover shadow-2xl border-2 border-amber-400/50"
+                        referrerPolicy="no-referrer"
                       />
                     )}
                     <div className="text-left">
@@ -141,7 +142,8 @@ export default function ShareImage({ bracket, person }: ShareImageProps) {
                                 >
                                   {film.posterUrl && (
                                     <img src={film.posterUrl} alt={film.title}
-                                      className="w-9 h-12 rounded object-cover shrink-0" />
+                                      className="w-9 h-12 rounded object-cover shrink-0"
+                                      referrerPolicy="no-referrer" />
                                   )}
                                   <div className="min-w-0">
                                     <span className="block truncate font-medium">{film.title}</span>

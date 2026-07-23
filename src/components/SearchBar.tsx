@@ -184,6 +184,7 @@ export default function SearchBar({
               <div className="w-10 h-10 rounded-full bg-gray-700 overflow-hidden shrink-0">
                 {item.image ? (
                   <img src={item.image} alt="" className="w-full h-full object-cover"
+                    referrerPolicy="no-referrer"
                     onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }} />
                 ) : (
                   <div className="w-full h-full flex items-center justify-center text-sm text-gray-500">

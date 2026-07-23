@@ -51,6 +51,7 @@ export default function ResultsPage() {
                 src={champion.posterUrl}
                 alt={champion.title}
                 className="w-full h-full object-cover"
+                referrerPolicy="no-referrer"
               />
             </div>
           )}

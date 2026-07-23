@@ -7,48 +7,43 @@ const debug = (...args: unknown[]) => console.log('[Douban]', ...args);
 // 请求工具
 // ============================================================
 
-async function fetchJSON(url: string): Promise<any> {
+// 生产环境 CORS 代理列表（按可靠性排序）
+const CORS_PROXIES = [
+  (u: string) => `https://api.allorigins.win/raw?url=${encodeURIComponent(u)}`,
+  (u: string) => `https://corsproxy.io/?${encodeURIComponent(u)}`,
+  (u: string) => `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(u)}`,
+  (u: string) => `https://cors-anywhere.herokuapp.com/${u}`,
+  (u: string) => `https://thingproxy.freeboard.io/fetch/${u}`,
+];
+
+async function fetchViaProxy(url: string): Promise<Response> {
   if (IS_DEV) {
     const proxyPath = url
       .replace('https://movie.douban.com', '/api/movie')
       .replace('https://www.douban.com', '/api/www')
       .replace('https://search.douban.com', '/api/search');
-    const res = await fetch(proxyPath);
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    return await res.json();
+    return fetch(proxyPath);
   }
-  const proxies = [
-    (u: string) => `https://corsproxy.io/?${encodeURIComponent(u)}`,
-    (u: string) => `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(u)}`,
-  ];
-  for (const p of proxies) {
-    try { const r = await fetch(p(url)); if (r.ok) return await r.json(); } catch {}
+  // 逐个尝试 CORS 代理
+  for (const p of CORS_PROXIES) {
+    try {
+      const r = await fetch(p(url));
+      if (r.ok) return r;
+    } catch {}
   }
   throw new Error('所有代理均不可用');
 }
 
+async function fetchJSON(url: string): Promise<any> {
+  const res = await fetchViaProxy(url);
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return await res.json();
+}
+
 async function fetchText(url: string): Promise<string> {
-  if (IS_DEV) {
-    const proxyPath = url
-      .replace('https://movie.douban.com', '/api/movie')
-      .replace('https://www.douban.com', '/api/www')
-      .replace('https://search.douban.com', '/api/search');
-    const res = await fetch(proxyPath);
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    return await res.text();
-  }
-  // 生产环境用 CORS 代理抓 HTML
-  const proxies = [
-    (u: string) => `https://corsproxy.io/?${encodeURIComponent(u)}`,
-    (u: string) => `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(u)}`,
-  ];
-  for (const p of proxies) {
-    try {
-      const r = await fetch(p(url));
-      if (r.ok) return await r.text();
-    } catch {}
-  }
-  throw new Error('所有代理均不可用');
+  const res = await fetchViaProxy(url);
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return await res.text();
 }
 
 // 防限流：简单延时
@@ -69,6 +64,7 @@ async function rateLimitedFetch(url: string): Promise<string> {
 function imgUrl(url: string | null | undefined): string | null {
   if (!url) return null;
   if (IS_DEV) {
+    // 本地开发：走 Vite 代理
     const match = url.match(/img(\d+)\.doubanio\.com/);
     if (match) {
       const num = match[1];
@@ -82,7 +78,8 @@ function imgUrl(url: string | null | undefined): string | null {
     }
     return url;
   }
-  return `https://images.weserv.nl/?url=${encodeURIComponent(url)}&w=300&output=webp`;
+  // 生产环境：直接用豆瓣 CDN URL（浏览器会通过 referrerpolicy 处理防盗链）
+  return url;
 }
 
 // ============================================================
@@ -265,7 +262,7 @@ function collectFromItems(
 }
 
 // ============================================================
-// 主搜索：suggest API 并行 + 搜索页补充
+// 主搜索：suggest API 级联搜索 + 搜索页补充
 // ============================================================
 
 export async function searchPerson(query: string): Promise<{ people: Person[]; movies: Movie[] }> {
@@ -273,9 +270,6 @@ export async function searchPerson(query: string): Promise<{ people: Person[]; m
 
   const movieMap = new Map<string, Movie>();
   const peopleMap = new Map<string, Person>();
-
-  // === 第一阶段：suggest API，并行搜索所有方向 ===
-  const { cards: c1, words } = await suggest(query);
   const searchedQueries = new Set<string>();
   searchedQueries.add(query);
 
@@ -288,44 +282,63 @@ export async function searchPerson(query: string): Promise<{ people: Person[]; m
     movieMap.set(mId, makeMovie(mId, card.title, card.cover_url, rating, 0, card.year || ''));
   }
 
+  async function searchSuggestAndCollect(q: string): Promise<string[]> {
+    if (searchedQueries.has(q)) return [];
+    searchedQueries.add(q);
+    const { cards, words } = await suggest(q);
+    for (const card of cards) addSuggestCard(card);
+    return words;
+  }
+
+  // === 第一阶段：初始搜索 + 拿到联想词 ===
+  const { cards: c1, words: words1 } = await suggest(query);
   for (const card of c1) addSuggestCard(card);
 
-  // 收集所有需要搜索的词
-  const queriesToSearch = new Set<string>();
-  for (const w of words) {
-    if (w && w.length >= 2 && w !== query && !searchedQueries.has(w)) {
-      queriesToSearch.add(w);
+  // 第一波联想词（含额外组合）
+  const round1Words = [...new Set([
+    ...words1,
+    `${query} 电影`,
+    `${query} 导演`,
+    `${query} 演员`,
+    `${query} 作品`,
+    `${query} 全部`,
+  ])].filter(w => w && w.length >= 2 && w !== query).slice(0, 15);
+
+  // 分批并行搜索第一波
+  const allWords = new Set<string>();
+  for (let i = 0; i < round1Words.length; i += 5) {
+    const batch = round1Words.slice(i, i + 5);
+    const results = await Promise.all(batch.map(searchSuggestAndCollect));
+    // 收集第二波联想词
+    for (const words of results) {
+      for (const w of words) {
+        if (w && w.length >= 2 && !searchedQueries.has(w)) {
+          allWords.add(w);
+        }
+      }
     }
   }
-  // 额外搜索词
-  for (const extra of [`${query} 电影`, `${query} 导演`, `${query} 演员`, `${query} 作品`]) {
-    if (!searchedQueries.has(extra)) queriesToSearch.add(extra);
+
+  debug(`  第一波搜索后: ${movieMap.size} 部电影, ${allWords.size} 个新联想词`);
+
+  // === 第二阶段：级联搜索第二波联想词 ===
+  if (movieMap.size < 50) {
+    const round2Words = [...allWords].filter(w => w !== query).slice(0, 20);
+    for (let i = 0; i < round2Words.length; i += 5) {
+      const batch = round2Words.slice(i, i + 5);
+      await Promise.all(batch.map(searchSuggestAndCollect));
+    }
+    debug(`  第二波搜索后: ${movieMap.size} 部电影`);
   }
 
-  // 并行搜索所有词（最多同时8个，分批）
-  const queryBatch = [...queriesToSearch].slice(0, 15);
-  async function searchBatch(q: string) {
-    if (searchedQueries.has(q)) return;
-    searchedQueries.add(q);
-    const { cards } = await suggest(q);
-    for (const card of cards) addSuggestCard(card);
-  }
-
-  // 分批并行，每批最多5个，避免浏览器连接限制
-  for (let i = 0; i < queryBatch.length; i += 5) {
-    const batch = queryBatch.slice(i, i + 5);
-    await Promise.all(batch.map(searchBatch));
-  }
-
-  debug(`  suggest阶段: ${movieMap.size} 部电影`);
-
-  // === 第二阶段：搜索页（限流保护，只拿头像+补充结果）===
-  if (movieMap.size < 30) {
+  // === 第三阶段：搜索页（拿头像+补充）===
+  let gotSearchPage = false;
+  if (movieMap.size < 40) {
     try {
       const page = await searchPage(query, 0);
       if (page && page.items.length > 0) {
+        gotSearchPage = true;
         const avatar = collectFromItems(page.items, movieMap, peopleMap);
-        // 设置头像
         if (avatar) {
           const matchName = [...peopleMap.keys()].find(
             n => query.includes(n) || n.includes(query)
@@ -336,9 +349,7 @@ export async function searchPerson(query: string): Promise<{ people: Person[]; m
             peopleMap.set(query, { id: `q:${query}`, name: query, department: '影人', avatarUrl: avatar });
           }
         }
-
-        // 第二页（如果结果真的很多）
-        if (movieMap.size < 30 && page.total > 15) {
+        if (movieMap.size < 40 && page.total > 15) {
           const page2 = await searchPage(query, 15);
           if (page2 && page2.items.length > 0) {
             collectFromItems(page2.items, movieMap, peopleMap);
@@ -346,19 +357,28 @@ export async function searchPerson(query: string): Promise<{ people: Person[]; m
         }
       }
     } catch (e) {
-      debug('  搜索页获取失败，仅使用 suggest 结果');
+      debug('  搜索页获取失败');
     }
   }
 
-  // === 第三阶段：如果还不够，用提取到的影人名字搜 ===
+  // === 第四阶段：如果搜索页没拿到，继续级联 ===
+  if (!gotSearchPage && movieMap.size < 30) {
+    // 用已有的电影名搜索更多
+    const movieTitles = [...movieMap.values()].map(m => m.title).slice(0, 10);
+    for (let i = 0; i < movieTitles.length; i += 5) {
+      const batch = movieTitles.slice(i, i + 5).map(t => searchSuggestAndCollect(t));
+      await Promise.all(batch);
+    }
+    debug(`  电影名级联后: ${movieMap.size} 部`);
+  }
+
+  // === 第五阶段：最后兜底，用影人名字搜 ===
   if (movieMap.size < 16) {
-    const names = [...peopleMap.keys()].filter(n => n !== query).slice(0, 3);
+    const names = [...peopleMap.keys()].filter(n => n !== query && !searchedQueries.has(n)).slice(0, 5);
     for (const name of names) {
       if (movieMap.size >= 16) break;
-      if (searchedQueries.has(name)) continue;
-      searchedQueries.add(name);
-      const { cards } = await suggest(name);
-      for (const card of cards) addSuggestCard(card);
+      await searchSuggestAndCollect(name);
+      await searchSuggestAndCollect(`${name} 电影`);
     }
   }
 

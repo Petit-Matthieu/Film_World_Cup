@@ -47,6 +47,7 @@ function FilmSide({
             alt={film.title}
             className={`w-full h-full object-cover transition-all duration-300
               ${isHovered && !isVoted ? 'scale-110 brightness-110' : ''}`}
+            referrerPolicy="no-referrer"
             onError={() => setImgError(true)}
           />
         ) : (

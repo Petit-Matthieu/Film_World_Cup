@@ -25,6 +25,7 @@ function MiniFilm({ film, isWinner }: { film: Movie | null; isWinner?: boolean }
             alt={film.title}
             className="w-full h-full object-cover"
             loading="lazy"
+            referrerPolicy="no-referrer"
           />
         ) : (
           <div className="w-full h-full flex items-center justify-center text-xs">🎬</div>

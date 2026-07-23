@@ -28,6 +28,7 @@ export default function PersonCard({ person, onClick, rank }: PersonCardProps) {
             alt={person.name}
             className="w-full h-full object-cover"
             loading="lazy"
+            referrerPolicy="no-referrer"
             onError={(e) => {
               (e.target as HTMLImageElement).style.display = 'none';
               (e.target as HTMLImageElement).nextElementSibling?.classList.remove('hidden');
