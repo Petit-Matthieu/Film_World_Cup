@@ -420,10 +420,22 @@ export async function getPersonFilms(personName: string): Promise<Movie[]> {
 }
 
 // ============================================================
-// 快速联想建议（带缓存，避免重复请求）
+// 快速联想建议 — 只返回单个人名，过滤干扰项
 // ============================================================
 
 const suggestCache = new Map<string, any[]>();
+
+// 判断是否像人名（2-4个中文字符，或2-6个英文字母）
+function looksLikePersonName(s: string): boolean {
+  if (!s || s.length < 2 || s.length > 8) return false;
+  // 排除包含数字、年份、特殊符号的
+  if (/[\d年月日|·•《》()（）\/]/.test(s)) return false;
+  // 排除纯英文且太长（不太可能是人名）
+  if (/^[a-zA-Z\s]+$/.test(s) && s.length > 10) return false;
+  // 排除包含"电影""导演""演员""作品"等关键词
+  if (/电影|导演|演员|作品|全部|主要|出演|研讨会/.test(s)) return false;
+  return true;
+}
 
 export async function searchSuggest(query: string): Promise<any[]> {
   if (suggestCache.has(query)) return suggestCache.get(query)!;
@@ -433,26 +445,43 @@ export async function searchSuggest(query: string): Promise<any[]> {
     const items: any[] = [];
     const seenNames = new Set<string>();
 
+    // 优先：把用户输入的 query 本身作为第一个建议
+    if (looksLikePersonName(query)) {
+      seenNames.add(query);
+      items.push({
+        title: query,
+        subTitle: '影人',
+        url: `person:q:${query}`,
+        type: 'person',
+        image: '',
+      });
+    }
+
+    // 从电影卡片中提取人名
     for (const card of cards) {
       if (card.type === 'movie' || card.type === 'tv') {
         const parts = (card.card_subtitle || '').split(/\s*\/\s*/).map((s: string) => s.trim());
-        for (const p of parts.slice(-3)) {
-          p.split(/\s+/).filter((n: string) => n.length >= 2 && n.length <= 6 && !/[\d年月日]/.test(n))
-            .forEach((n: string) => {
-              if (!seenNames.has(n)) {
-                seenNames.add(n);
-                items.push({ title: n, subTitle: '影人', url: `person:q:${n}`, type: 'person', image: '' });
-              }
-            });
+        // 只取导演/演员部分（最后几段）
+        for (const p of parts.slice(-4)) {
+          // 用空格/逗号分割多个人名
+          p.split(/[\s,，]+/).forEach((n: string) => {
+            n = n.trim();
+            if (looksLikePersonName(n) && !seenNames.has(n)) {
+              seenNames.add(n);
+              items.push({ title: n, subTitle: '影人', url: `person:q:${n}`, type: 'person', image: '' });
+            }
+          });
         }
       }
     }
+
+    // 从联想词中提取（仅取像人名的单个人名，不要复合搜索词）
     for (const w of words) {
-      if (w.length >= 2 && w.length <= 8 && !/[\d年月日|·•]/.test(w)) {
-        if (!seenNames.has(w)) {
-          seenNames.add(w);
-          items.push({ title: w, subTitle: '影人', url: `person:q:${w}`, type: 'person', image: '' });
-        }
+      // 排除复合搜索词（包含空格、·等）
+      if (w.includes(' ')) continue;
+      if (looksLikePersonName(w) && !seenNames.has(w)) {
+        seenNames.add(w);
+        items.push({ title: w, subTitle: '影人', url: `person:q:${w}`, type: 'person', image: '' });
       }
     }
 
