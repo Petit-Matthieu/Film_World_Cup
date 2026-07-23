@@ -45,22 +45,21 @@ export default function SearchBar({
     }
   };
 
-  // 普通输入（非IME）：每次按键都触发
   const handleChange = () => {
-    if (composingRef.current) return; // IME 组合中不干预
+    // IME 组合中跳过，等 compositionEnd 统一处理
+    if (composingRef.current) return;
     const value = inputRef.current?.value || '';
     doNotify(value);
   };
 
-  // IME 开始时标记，此后 onChange 会被跳过
   const handleCompositionStart = () => {
     composingRef.current = true;
   };
 
-  // IME 结束时才真正同步值
-  const handleCompositionEnd = (e: React.CompositionEvent<HTMLInputElement>) => {
+  const handleCompositionEnd = () => {
     composingRef.current = false;
-    const value = (e.target as HTMLInputElement).value;
+    // 主动触发一次同步
+    const value = inputRef.current?.value || '';
     doNotify(value);
   };
 

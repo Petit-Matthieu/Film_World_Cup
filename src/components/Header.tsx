@@ -19,7 +19,7 @@ export default function Header() {
           </div>
         </button>
 
-        {state.person && (
+        {state.person && state.phase !== 'search' && (
           <div className="text-right">
             <p className="text-sm text-gray-400">
               {state.person.name}
