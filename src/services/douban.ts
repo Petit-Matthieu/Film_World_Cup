@@ -302,12 +302,11 @@ export async function searchPerson(query: string): Promise<{ people: Person[]; m
     debug('  搜索页失败');
   }
 
-  // === Suggest 补充（搜索页失败时）===
-  if (!searchPageSuccess || movieMap.size < 8) {
-    debug('  suggest 补充...');
+  // === Suggest 补充（搜索页不够时补量）===
+  if (movieMap.size < 30) {
+    debug(`  suggest 补充 (当前${movieMap.size}部)...`);
     const { cards: c1, words } = await suggest(query);
-    const searchedQueries = new Set<string>();
-    searchedQueries.add(query);
+    const searchedQueries = new Set<string>([query]);
 
     function addSuggestCard(card: Card) {
       const mId = card.url.match(/subject\/(\d+)/)?.[1];
@@ -320,19 +319,23 @@ export async function searchPerson(query: string): Promise<{ people: Person[]; m
 
     for (const card of c1) addSuggestCard(card);
 
-    // 只用联想词搜一波
-    const queries = [...new Set([...words, `${query} 电影`, `${query} 导演`])]
-      .filter(w => w && w !== query && !searchedQueries.has(w))
-      .slice(0, 10);
-    searchedQueries.add(query);
+    // 收集所有搜索词（words + 额外组合），不限数量，全并行
+    const extraQueries = words.filter(w => w && !w.includes(' ') && w.length >= 2 && w !== query);
+    const comboQueries = [`${query} 电影`, `${query} 导演`, `${query} 演员`, `${query} 作品`];
+    const allQueries = [...new Set([...extraQueries, ...comboQueries])]
+      .filter(w => w && !searchedQueries.has(w))
+      .slice(0, 20);
 
-    if (queries.length > 0) {
-      await Promise.all(queries.map(async (q) => {
+    if (allQueries.length > 0) {
+      await Promise.all(allQueries.map(async (q) => {
         if (searchedQueries.has(q)) return;
         searchedQueries.add(q);
-        const { cards } = await suggest(q);
-        for (const card of cards) addSuggestCard(card);
+        try {
+          const { cards } = await suggest(q);
+          for (const card of cards) addSuggestCard(card);
+        } catch {}
       }));
+      debug(`  suggest后: ${movieMap.size} 部`);
     }
   }
 
