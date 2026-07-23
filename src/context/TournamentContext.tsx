@@ -124,17 +124,20 @@ const TournamentContext = createContext<TournamentContextType | null>(null);
 export function TournamentProvider({ children }: { children: ReactNode }) {
   const [state, dispatch] = useReducer(tournamentReducer, initialState);
 
-  // 恢复保存的状态（仅在刷新时，且只在 bracket/results 阶段恢复）
+  // 恢复保存的状态（仅 bracket/results 阶段）
   useEffect(() => {
     const saved = loadState();
     if (saved && (saved.phase === 'bracket' || saved.phase === 'results')) {
       if (saved.bracket && saved.films.length > 0) {
         dispatch({ type: 'RESTORE_STATE', state: saved });
+        return;
       }
     }
+    // 其他情况清掉旧数据
+    clearState();
   }, []);
 
-  // 保存状态
+  // 保存状态（仅比赛进行中需要持久化）
   useEffect(() => {
     if (state.phase === 'bracket' || state.phase === 'results') {
       saveState(state);

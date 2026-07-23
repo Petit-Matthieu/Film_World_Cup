@@ -139,7 +139,7 @@ export default function SearchBar({
                        text-white placeholder-gray-500
                        focus:outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/30
                        transition-all text-lg"
-            disabled={isLoading || isSearching}
+            disabled={isLoading}
             autoFocus
             autoComplete="off"
           />
