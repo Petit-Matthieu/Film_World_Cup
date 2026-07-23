@@ -50,7 +50,7 @@ async function fetchText(url: string): Promise<string> {
 let lastSearchPageTime = 0;
 async function rateLimitedFetch(url: string): Promise<string> {
   const now = Date.now();
-  const minInterval = 1500; // 1.5秒间隔
+  const minInterval = 800; // 0.8秒间隔
   const wait = Math.max(0, minInterval - (now - lastSearchPageTime));
   if (wait > 0) await new Promise(r => setTimeout(r, wait));
   lastSearchPageTime = Date.now();
@@ -269,7 +269,7 @@ function collectFromItems(
 }
 
 // ============================================================
-// 主搜索：suggest API 级联搜索 + 搜索页补充
+// 主搜索：搜索页优先（一次请求拿大量结果+头像），suggest 备选
 // ============================================================
 
 export async function searchPerson(query: string): Promise<{ people: Person[]; movies: Movie[] }> {
@@ -277,124 +277,67 @@ export async function searchPerson(query: string): Promise<{ people: Person[]; m
 
   const movieMap = new Map<string, Movie>();
   const peopleMap = new Map<string, Person>();
-  const searchedQueries = new Set<string>();
-  searchedQueries.add(query);
 
-  function addSuggestCard(card: Card) {
-    const mId = card.url.match(/subject\/(\d+)/)?.[1];
-    if (!mId || movieMap.has(mId)) return;
-    const parts = (card.card_subtitle || '').split(/\s*\/\s*/).map((s: string) => s.trim());
-    let rating = 0;
-    if (parts[0]) { const m = parts[0].match(/([\d.]+)/); if (m) rating = parseFloat(m[1]); }
-    movieMap.set(mId, makeMovie(mId, card.title, card.cover_url, rating, 0, card.year || ''));
-  }
-
-  async function searchSuggestAndCollect(q: string): Promise<string[]> {
-    if (searchedQueries.has(q)) return [];
-    searchedQueries.add(q);
-    const { cards, words } = await suggest(q);
-    for (const card of cards) addSuggestCard(card);
-    return words;
-  }
-
-  // === 第一阶段：初始搜索 + 拿到联想词 ===
-  const { cards: c1, words: words1 } = await suggest(query);
-  for (const card of c1) addSuggestCard(card);
-
-  // 第一波联想词（含额外组合）
-  const round1Words = [...new Set([
-    ...words1,
-    `${query} 电影`,
-    `${query} 导演`,
-    `${query} 演员`,
-    `${query} 作品`,
-    `${query} 全部`,
-  ])].filter(w => w && w.length >= 2 && w !== query).slice(0, 15);
-
-  // 分批并行搜索第一波
-  const allWords = new Set<string>();
-  for (let i = 0; i < round1Words.length; i += 5) {
-    const batch = round1Words.slice(i, i + 5);
-    const results = await Promise.all(batch.map(searchSuggestAndCollect));
-    // 收集第二波联想词
-    for (const words of results) {
-      for (const w of words) {
-        if (w && w.length >= 2 && !searchedQueries.has(w)) {
-          allWords.add(w);
+  // === 搜索页（主通道：一次拿15条+头像）===
+  let searchPageSuccess = false;
+  try {
+    const page = await searchPage(query, 0);
+    if (page && page.items.length > 0) {
+      searchPageSuccess = true;
+      const avatar = collectFromItems(page.items, movieMap, peopleMap);
+      if (avatar) {
+        peopleMap.set(query, { id: `q:${query}`, name: query, department: '影人', avatarUrl: avatar });
+      }
+      // 第2页
+      if (movieMap.size < 40 && page.total > 15) {
+        const page2 = await searchPage(query, 15);
+        if (page2 && page2.items.length > 0) {
+          collectFromItems(page2.items, movieMap, peopleMap);
         }
       }
     }
+  } catch (e) {
+    debug('  搜索页失败');
   }
 
-  debug(`  第一波搜索后: ${movieMap.size} 部电影, ${allWords.size} 个新联想词`);
+  // === Suggest 补充（搜索页失败时）===
+  if (!searchPageSuccess || movieMap.size < 8) {
+    debug('  suggest 补充...');
+    const { cards: c1, words } = await suggest(query);
+    const searchedQueries = new Set<string>();
+    searchedQueries.add(query);
 
-  // === 第二阶段：级联搜索第二波联想词 ===
-  if (movieMap.size < 50) {
-    const round2Words = [...allWords].filter(w => w !== query).slice(0, 20);
-    for (let i = 0; i < round2Words.length; i += 5) {
-      const batch = round2Words.slice(i, i + 5);
-      await Promise.all(batch.map(searchSuggestAndCollect));
+    function addSuggestCard(card: Card) {
+      const mId = card.url.match(/subject\/(\d+)/)?.[1];
+      if (!mId || movieMap.has(mId)) return;
+      const parts = (card.card_subtitle || '').split(/\s*\/\s*/).map((s: string) => s.trim());
+      let rating = 0;
+      if (parts[0]) { const m = parts[0].match(/([\d.]+)/); if (m) rating = parseFloat(m[1]); }
+      movieMap.set(mId, makeMovie(mId, card.title, card.cover_url, rating, 0, card.year || ''));
     }
-    debug(`  第二波搜索后: ${movieMap.size} 部电影`);
-  }
 
-  // === 第三阶段：搜索页（拿头像+补充）===
-  let gotSearchPage = false;
-  if (movieMap.size < 40) {
-    try {
-      const page = await searchPage(query, 0);
-      if (page && page.items.length > 0) {
-        gotSearchPage = true;
-        const avatar = collectFromItems(page.items, movieMap, peopleMap);
-        if (avatar) {
-          const matchName = [...peopleMap.keys()].find(
-            n => query.includes(n) || n.includes(query)
-          );
-          if (matchName) {
-            peopleMap.get(matchName)!.avatarUrl = avatar;
-          } else {
-            peopleMap.set(query, { id: `q:${query}`, name: query, department: '影人', avatarUrl: avatar });
-          }
-        }
-        if (movieMap.size < 40 && page.total > 15) {
-          const page2 = await searchPage(query, 15);
-          if (page2 && page2.items.length > 0) {
-            collectFromItems(page2.items, movieMap, peopleMap);
-          }
-        }
-      }
-    } catch (e) {
-      debug('  搜索页获取失败');
+    for (const card of c1) addSuggestCard(card);
+
+    // 只用联想词搜一波
+    const queries = [...new Set([...words, `${query} 电影`, `${query} 导演`])]
+      .filter(w => w && w !== query && !searchedQueries.has(w))
+      .slice(0, 10);
+    searchedQueries.add(query);
+
+    if (queries.length > 0) {
+      await Promise.all(queries.map(async (q) => {
+        if (searchedQueries.has(q)) return;
+        searchedQueries.add(q);
+        const { cards } = await suggest(q);
+        for (const card of cards) addSuggestCard(card);
+      }));
     }
   }
 
-  // === 第四阶段：如果搜索页没拿到，继续级联 ===
-  if (!gotSearchPage && movieMap.size < 30) {
-    // 用已有的电影名搜索更多
-    const movieTitles = [...movieMap.values()].map(m => m.title).slice(0, 10);
-    for (let i = 0; i < movieTitles.length; i += 5) {
-      const batch = movieTitles.slice(i, i + 5).map(t => searchSuggestAndCollect(t));
-      await Promise.all(batch);
-    }
-    debug(`  电影名级联后: ${movieMap.size} 部`);
-  }
-
-  // === 第五阶段：最后兜底，用影人名字搜 ===
-  if (movieMap.size < 16) {
-    const names = [...peopleMap.keys()].filter(n => n !== query && !searchedQueries.has(n)).slice(0, 5);
-    for (const name of names) {
-      if (movieMap.size >= 16) break;
-      await searchSuggestAndCollect(name);
-      await searchSuggestAndCollect(`${name} 电影`);
-    }
-  }
-
-  debug(`  去重前: ${movieMap.size} 部电影`);
-
-  // 按标题+年份去重：同名同年电影只保留评分最高的
+  // === 去重 ===
   const dedupedMovies = new Map<string, Movie>();
   for (const movie of movieMap.values()) {
-    if (!movie.title) continue; // 跳过空标题
+    if (!movie.title) continue;
     const key = `${movie.title}|${movie.releaseYear}`;
     const existing = dedupedMovies.get(key);
     if (!existing || movie.rating > existing.rating ||
@@ -403,7 +346,7 @@ export async function searchPerson(query: string): Promise<{ people: Person[]; m
     }
   }
 
-  debug(`  去重后: ${dedupedMovies.size} 部电影，${peopleMap.size} 个影人`);
+  debug(`  ${dedupedMovies.size} 部电影，${peopleMap.size} 个影人`);
 
   const people = [...peopleMap.values()];
   people.sort((a, b) => {
