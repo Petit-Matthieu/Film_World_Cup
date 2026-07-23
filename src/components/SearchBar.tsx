@@ -32,7 +32,7 @@ export default function SearchBar({
   const dropdownRef = useRef<HTMLDivElement>(null);
   const composingRef = useRef(false);
 
-  // 通知父组件（带防抖，由父组件负责 debounce）
+  // 通知父组件
   const doNotify = (value: string) => {
     setQuery(value);
     setSelectedIndex(-1);
@@ -45,24 +45,22 @@ export default function SearchBar({
     }
   };
 
+  // 普通输入（非IME）：每次按键都触发
   const handleChange = () => {
+    if (composingRef.current) return; // IME 组合中不干预
     const value = inputRef.current?.value || '';
-    if (!composingRef.current) {
-      doNotify(value);
-    } else {
-      // 组合中只更新显示，不触发搜索
-      setQuery(value);
-      setSelectedIndex(-1);
-    }
+    doNotify(value);
   };
 
+  // IME 开始时标记，此后 onChange 会被跳过
   const handleCompositionStart = () => {
     composingRef.current = true;
   };
 
-  const handleCompositionEnd = () => {
+  // IME 结束时才真正同步值
+  const handleCompositionEnd = (e: React.CompositionEvent<HTMLInputElement>) => {
     composingRef.current = false;
-    const value = inputRef.current?.value || '';
+    const value = (e.target as HTMLInputElement).value;
     doNotify(value);
   };
 
@@ -96,8 +94,8 @@ export default function SearchBar({
       e.preventDefault();
       setSelectedIndex((prev) => (prev > 0 ? prev - 1 : suggestions.length - 1));
     } else if (e.key === 'Enter') {
-      e.preventDefault();
       if (selectedIndex >= 0 && selectedIndex < suggestions.length) {
+        e.preventDefault();
         handleSelect(suggestions[selectedIndex]);
       }
     } else if (e.key === 'Escape') {
