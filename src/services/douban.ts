@@ -61,6 +61,9 @@ async function rateLimitedFetch(url: string): Promise<string> {
 // 图片 URL
 // ============================================================
 
+// 生产环境图片代理（Cloudflare Worker URL — 部署 worker.js 后填入）
+const IMG_PROXY = 'https://film-img.用户名.workers.dev';
+
 function imgUrl(url: string | null | undefined): string | null {
   if (!url) return null;
   if (IS_DEV) {
@@ -78,8 +81,12 @@ function imgUrl(url: string | null | undefined): string | null {
     }
     return url;
   }
-  // 生产环境：用图片代理（豆瓣CDN有防盗链）
-  return `https://wsrv.nl/?url=${encodeURIComponent(url)}&w=400&output=webp&default=404`;
+  // 生产环境：Cloudflare Worker 代理（带 Referer: movie.douban.com）
+  if (IMG_PROXY.includes('用户名')) {
+    // Worker 未部署，尝试直连（大概率被防盗链拦截）
+    return url;
+  }
+  return `${IMG_PROXY}/?url=${encodeURIComponent(url)}`;
 }
 
 // ============================================================
@@ -439,15 +446,32 @@ export async function getPersonFilms(personName: string): Promise<Movie[]> {
 
 const suggestCache = new Map<string, any[]>();
 
-// 判断是否像人名（2-4个中文字符，或2-6个英文字母）
+// 非人名的关键词：类型、八卦等
+const NON_PERSON_KEYWORDS = new Set([
+  '剧情', '喜剧', '动作', '科幻', '爱情', '恐怖', '悬疑', '犯罪', '冒险', '战争',
+  '动画', '纪录', '纪录片', '短片', '家庭', '奇幻', '武侠', '历史', '音乐', '歌舞',
+  '运动', '传记', '情色', '古装', '黑色', '惊悚', '灾难', '儿童', '西部',
+  '同性', '戏曲', '真人秀', '脱口秀', '舞台艺术',
+]);
+
+// 八卦/非作品相关词
+const GOSSIP_KEYWORDS = [
+  '私生子', '出轨', '离婚', '结婚', '老婆', '老公', '女友', '男友',
+  '绯闻', '恋情', '小三', '去世', '死亡', '吸毒', '被捕',
+];
+
 function looksLikePersonName(s: string): boolean {
-  if (!s || s.length < 2 || s.length > 8) return false;
+  if (!s || s.length < 2 || s.length > 4) return false;
   // 排除包含数字、年份、特殊符号的
   if (/[\d年月日|·•《》()（）\/]/.test(s)) return false;
-  // 排除纯英文且太长（不太可能是人名）
-  if (/^[a-zA-Z\s]+$/.test(s) && s.length > 10) return false;
-  // 排除包含"电影""导演""演员""作品"等关键词
-  if (/电影|导演|演员|作品|全部|主要|出演|研讨会/.test(s)) return false;
+  // 排除类型关键词
+  if (NON_PERSON_KEYWORDS.has(s)) return false;
+  // 纯英文名允许（如 Nolan）
+  if (/^[a-zA-Z\s.\-]+$/.test(s)) return s.length >= 3;
+  // 中文名：2-4字，不应包含八卦词
+  for (const kw of GOSSIP_KEYWORDS) {
+    if (s.includes(kw)) return false;
+  }
   return true;
 }
 
