@@ -382,7 +382,20 @@ export async function searchPerson(query: string): Promise<{ people: Person[]; m
     }
   }
 
-  debug(`  最终: ${movieMap.size} 部电影，${peopleMap.size} 个影人`);
+  debug(`  去重前: ${movieMap.size} 部电影`);
+
+  // 按标题去重：同名电影只保留评分最高的
+  const dedupedMovies = new Map<string, Movie>();
+  for (const movie of movieMap.values()) {
+    const key = movie.title; // 用中文名作为去重key
+    const existing = dedupedMovies.get(key);
+    if (!existing || movie.rating > existing.rating ||
+        (movie.rating === existing.rating && movie.voteCount > existing.voteCount)) {
+      dedupedMovies.set(key, movie);
+    }
+  }
+
+  debug(`  去重后: ${dedupedMovies.size} 部电影，${peopleMap.size} 个影人`);
 
   const people = [...peopleMap.values()];
   people.sort((a, b) => {
@@ -391,7 +404,7 @@ export async function searchPerson(query: string): Promise<{ people: Person[]; m
     return (bM ? 1 : 0) - (aM ? 1 : 0);
   });
 
-  const movies = [...movieMap.values()];
+  const movies = [...dedupedMovies.values()];
   movies.sort((a, b) => b.popularity - a.popularity);
 
   return { people: people.slice(0, 30), movies };
