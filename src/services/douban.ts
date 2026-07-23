@@ -11,16 +11,18 @@ const debug = (...args: unknown[]) => console.log('[Douban]', ...args);
 // 例如: https://douban-proxy.你的用户名.workers.dev
 const DOUBAN_PROXY = '';
 
-// 免费 CORS 代理（备用）
+// 免费 CORS 代理
 const FALLBACK_PROXIES = [
-  (u: string) => `https://api.allorigins.win/raw?url=${encodeURIComponent(u)}`,
+  (u: string) => `https://cors.eu.org/${u}`,
   (u: string) => `https://corsproxy.io/?${encodeURIComponent(u)}`,
+  (u: string) => `https://api.allorigins.win/raw?url=${encodeURIComponent(u)}`,
 ];
 
 function fetchWithTimeout(url: string, ms: number): Promise<Response> {
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => reject(new Error('timeout')), ms);
-    fetch(url).then(r => { clearTimeout(timer); if (r.ok) resolve(r); else reject(r.status); })
+    fetch(url)
+      .then(r => { clearTimeout(timer); resolve(r); })
       .catch(e => { clearTimeout(timer); reject(e); });
   });
 }
@@ -37,17 +39,17 @@ async function fetchViaProxy(url: string): Promise<Response> {
   if (DOUBAN_PROXY) {
     try {
       const r = await fetchWithTimeout(`${DOUBAN_PROXY}/?url=${encodeURIComponent(url)}`, 10000);
-      if (r.ok) return r;
+      return r;
     } catch {}
   }
-  // 备用免费代理
+  // 备用免费代理（不检查 ok，有些代理返回非200但数据正常）
   for (const p of FALLBACK_PROXIES) {
     try {
-      const r = await fetchWithTimeout(p(url), 6000);
-      if (r.ok) return r;
+      const r = await fetchWithTimeout(p(url), 8000);
+      return r; // 不管状态码，照常返回
     } catch {}
   }
-  throw new Error('所有代理均不可用——请部署 worker.js 到 Cloudflare Workers');
+  throw new Error('所有代理均不可用');
 }
 
 async function fetchJSON(url: string): Promise<any> {
