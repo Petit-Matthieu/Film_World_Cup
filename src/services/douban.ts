@@ -7,14 +7,21 @@ const debug = (...args: unknown[]) => console.log('[Douban]', ...args);
 // 请求工具
 // ============================================================
 
-// 生产环境 CORS 代理列表（按可靠性排序）
+// 生产环境 CORS 代理列表
 const CORS_PROXIES = [
   (u: string) => `https://api.allorigins.win/raw?url=${encodeURIComponent(u)}`,
   (u: string) => `https://corsproxy.io/?${encodeURIComponent(u)}`,
   (u: string) => `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(u)}`,
-  (u: string) => `https://cors-anywhere.herokuapp.com/${u}`,
-  (u: string) => `https://thingproxy.freeboard.io/fetch/${u}`,
 ];
+
+// 带超时的 fetch
+function fetchWithTimeout(url: string, ms: number): Promise<Response> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error('timeout')), ms);
+    fetch(url).then(r => { clearTimeout(timer); if (r.ok) resolve(r); else reject(r.status); })
+      .catch(e => { clearTimeout(timer); reject(e); });
+  });
+}
 
 async function fetchViaProxy(url: string): Promise<Response> {
   if (IS_DEV) {
@@ -24,22 +31,12 @@ async function fetchViaProxy(url: string): Promise<Response> {
       .replace('https://search.douban.com', '/api/search');
     return fetch(proxyPath);
   }
-  // 并行尝试所有代理，取最快成功的
-  const controllers: AbortController[] = [];
-  const attempts = CORS_PROXIES.map((p, i) => {
-    const ctrl = new AbortController();
-    controllers.push(ctrl);
-    const timer = setTimeout(() => ctrl.abort(), 5000); // 5秒超时
-    return fetch(p(url), { signal: ctrl.signal })
-      .then(r => { clearTimeout(timer); return r.ok ? r : Promise.reject(`HTTP ${r.status}`); })
-      .catch(err => { clearTimeout(timer); throw err; });
-  });
+  // 并行尝试所有代理，取第一个成功的
+  const attempts = CORS_PROXIES.map(p => fetchWithTimeout(p(url), 8000));
   try {
     return await Promise.any(attempts);
   } catch {
     throw new Error('所有代理均不可用');
-  } finally {
-    controllers.forEach(c => c.abort());
   }
 }
 
