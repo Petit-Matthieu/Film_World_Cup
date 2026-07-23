@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { useTournament } from '../context/TournamentContext';
 import MatchupCard from '../components/MatchupCard';
 import { getRoundName, getTotalRounds } from '../utils/bracket';
-import { ROUND_NAMES_32, ROUND_NAMES_16 } from '../constants';
+import { ROUND_NAMES_32, ROUND_NAMES_16, ROUND_NAMES_8 } from '../constants';
 import type { Movie } from '../types';
 
 export default function BracketPage() {
@@ -31,7 +31,7 @@ export default function BracketPage() {
   const { bracket } = state;
   const totalFilms = bracket.films.length;
   const totalRounds = getTotalRounds(totalFilms);
-  const roundNames = totalFilms === 32 ? ROUND_NAMES_32 : ROUND_NAMES_16;
+  const roundNames = totalFilms === 32 ? ROUND_NAMES_32 : totalFilms === 16 ? ROUND_NAMES_16 : ROUND_NAMES_8;
   const currentRound = bracket.currentRound;
   const currentMatchups = bracket.matchups[currentRound] || [];
   const totalMatchups = currentMatchups.length;

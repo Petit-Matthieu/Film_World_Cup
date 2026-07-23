@@ -2,7 +2,6 @@ import type { Movie, Matchup, BracketState } from '../types';
 
 /**
  * 标准种子排布：1 vs N, 2 vs N-1, ...
- * 种子1在上半区，种子2在下半区，以此类推
  */
 export function seedFilms(films: Movie[]): Movie[] {
   const n = films.length;
@@ -83,7 +82,6 @@ export function buildBracket(films: Movie[]): BracketState {
 
 /**
  * 投票后传播赢家到下一轮
- * 返回新的 matchups 数组
  */
 export function propagateWinner(
   matchups: Matchup[][],
@@ -93,15 +91,12 @@ export function propagateWinner(
     round.map((m) => ({ ...m }))
   );
 
-  // 更新投票的对阵
   const target = newMatchups[votedMatchup.roundIndex][votedMatchup.position];
   target.winner = votedMatchup.winner;
 
-  // 如果已经是最后一轮，不再传播
   const nextRound = votedMatchup.roundIndex + 1;
   if (nextRound >= newMatchups.length) return newMatchups;
 
-  // 传播到下一轮
   const nextPos = Math.floor(votedMatchup.position / 2);
   const nextMatchup = newMatchups[nextRound][nextPos];
 
@@ -131,7 +126,12 @@ export function getRoundName(roundIndex: number, totalFilms: number): string {
     const names = ['32强赛', '16强赛', '四分之一决赛', '半决赛', '决赛'];
     return names[roundIndex] || `第${roundIndex + 1}轮`;
   }
-  const names = ['16强赛', '四分之一决赛', '半决赛', '决赛'];
+  if (totalFilms === 16) {
+    const names = ['16强赛', '四分之一决赛', '半决赛', '决赛'];
+    return names[roundIndex] || `第${roundIndex + 1}轮`;
+  }
+  // 8 部
+  const names = ['四分之一决赛', '半决赛', '决赛'];
   return names[roundIndex] || `第${roundIndex + 1}轮`;
 }
 
@@ -145,10 +145,11 @@ export function getChampion(matchups: Matchup[][]): Movie | null {
 }
 
 /**
- * 选择适合的电影数量（32 或 16）
+ * 选择适合的电影数量（32、16 或 8）
  */
 export function selectFilmCount(availableCount: number): number {
   if (availableCount >= 32) return 32;
   if (availableCount >= 16) return 16;
-  return 0; // 不够16部
+  if (availableCount >= 8) return 8;
+  return 0;
 }
