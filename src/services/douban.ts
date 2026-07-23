@@ -9,7 +9,7 @@ const debug = (...args: unknown[]) => console.log('[Douban]', ...args);
 
 // Cloudflare Worker 代理 URL（部署 worker.js 后填入）
 // 例如: https://douban-proxy.你的用户名.workers.dev
-const DOUBAN_PROXY = '';
+const DOUBAN_PROXY = 'https://douban-proxy.deluxe-spell.workers.dev';
 
 // 免费 CORS 代理
 const FALLBACK_PROXIES = [
